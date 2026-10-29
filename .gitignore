@@ -1,0 +1,42 @@
+# Node
+node_modules/
+dist/
+*.log
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Данные и секреты — НИКОГДА не коммитить
+app/data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+!.env.example
+backups/
+
+# Capacitor (появится позже)
+app/android/.gradle/
+app/android/app/build/
+app/android/local.properties
+app/ios/Pods/
+app/ios/App/build/
+app/ios/App/App.xcworkspace/xcuserdata/
+app/ios/App/App.xcodeproj/xcuserdata/
+
+# ОС и редакторы
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

@@ -1,0 +1,118 @@
+{
+ "seed-001": {
+  "name": "Жим штанги лёжа",
+  "muscle": "chest"
+ },
+ "seed-002": {
+  "name": "Жим гантелей на наклонной скамье",
+  "muscle": "chest"
+ },
+ "seed-003": {
+  "name": "Отжимания на брусьях",
+  "muscle": "chest"
+ },
+ "seed-004": {
+  "name": "Разводка гантелей",
+  "muscle": "chest"
+ },
+ "seed-005": {
+  "name": "Подтягивания",
+  "muscle": "back"
+ },
+ "seed-006": {
+  "name": "Тяга штанги в наклоне",
+  "muscle": "back"
+ },
+ "seed-007": {
+  "name": "Тяга верхнего блока",
+  "muscle": "back"
+ },
+ "seed-008": {
+  "name": "Тяга нижнего блока",
+  "muscle": "back"
+ },
+ "seed-009": {
+  "name": "Тяга гантели одной рукой",
+  "muscle": "back"
+ },
+ "seed-010": {
+  "name": "Становая тяга",
+  "muscle": "back"
+ },
+ "seed-011": {
+  "name": "Приседания со штангой",
+  "muscle": "legs"
+ },
+ "seed-012": {
+  "name": "Жим ногами",
+  "muscle": "legs"
+ },
+ "seed-013": {
+  "name": "Выпады с гантелями",
+  "muscle": "legs"
+ },
+ "seed-014": {
+  "name": "Разгибание ног",
+  "muscle": "legs"
+ },
+ "seed-015": {
+  "name": "Сгибание ног",
+  "muscle": "legs"
+ },
+ "seed-016": {
+  "name": "Румынская тяга",
+  "muscle": "glutes"
+ },
+ "seed-017": {
+  "name": "Ягодичный мостик",
+  "muscle": "glutes"
+ },
+ "seed-018": {
+  "name": "Жим стоя",
+  "muscle": "shoulders"
+ },
+ "seed-019": {
+  "name": "Жим гантелей сидя",
+  "muscle": "shoulders"
+ },
+ "seed-020": {
+  "name": "Махи гантелей в стороны",
+  "muscle": "shoulders"
+ },
+ "seed-021": {
+  "name": "Тяга к лицу",
+  "muscle": "shoulders"
+ },
+ "seed-022": {
+  "name": "Подъём штанги на бицепс",
+  "muscle": "biceps"
+ },
+ "seed-023": {
+  "name": "Молотки",
+  "muscle": "biceps"
+ },
+ "seed-024": {
+  "name": "Французский жим",
+  "muscle": "triceps"
+ },
+ "seed-025": {
+  "name": "Разгибание на блоке",
+  "muscle": "triceps"
+ },
+ "seed-026": {
+  "name": "Скручивания",
+  "muscle": "core"
+ },
+ "seed-027": {
+  "name": "Планка",
+  "muscle": "core"
+ },
+ "seed-028": {
+  "name": "Подъём ног в висе",
+  "muscle": "core"
+ },
+ "seed-029": {
+  "name": "Подъём на носки стоя",
+  "muscle": "calves"
+ }
+}

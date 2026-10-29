@@ -1,0 +1,15 @@
+{
+  "name": "workout-room-relay",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Сигнальный релей для комнаты «Рядом»: передаёт только offer/answer, чат и presence через него не идут",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "start": "node src/index.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

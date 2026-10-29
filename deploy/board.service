@@ -1,0 +1,21 @@
+# Сервис мирового рейтинга. Установка: sudo cp deploy/board.service /etc/systemd/system/ && sudo systemctl enable --now board
+[Unit]
+Description=Workout world leaderboard
+After=network-online.target
+
+[Service]
+User=board
+WorkingDirectory=/opt/workout
+Environment=BOARD_DATA_DIR=/var/lib/board
+Environment=BOARD_ORIGINS=https://app.example
+Environment=BOARD_ALLOW_LOCALHOST=0
+Environment=BOARD_TRUST_PROXY=1
+ExecStart=/opt/workout/.venv/bin/python -m board run --host 127.0.0.1 --port 8800
+Restart=on-failure
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/board
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,25 @@
+# Пользовательский systemd-сервис. Установка:
+#   mkdir -p ~/.config/systemd/user && cp deploy/workout.service ~/.config/systemd/user/
+#   systemctl --user daemon-reload && systemctl --user enable --now workout
+#   loginctl enable-linger $USER      # чтобы сервис работал без входа в сессию
+[Unit]
+Description=Workout PWA: сервер синхронизации
+After=network-online.target
+
+[Service]
+WorkingDirectory=%h/workout-app
+Environment=WORKOUT_DATA_DIR=%h/workout-data
+EnvironmentFile=-%h/workout-data/.env
+ExecStart=%h/workout-app/.venv/bin/python -m server run
+Restart=on-failure
+# Ограничения процесса (не требуют прав root)
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+SystemCallArchitectures=native
+UMask=0077
+RestartSec=3
+
+[Install]
+WantedBy=default.target
