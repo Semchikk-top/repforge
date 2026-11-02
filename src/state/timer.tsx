@@ -1,5 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { platform } from '../platform';
 import { useSettings } from './settings';
+import { planRestNotification, REST_ADD_ACTION, REST_ADD_SEC, REST_TAG } from './notifyPlan';
 import { addState, isPaused as isPausedState, pauseState, remainingMs, restoreState, resumeState, startState, type TimerState } from './timerCore';
 
 // Логика (пауза, ±секунды, восстановление) вынесена в timerCore.ts: там её проверяют тесты.
@@ -76,12 +78,9 @@ export function RestTimerProvider({ children }: { children: ReactNode }) {
   const fire = useCallback(() => {
     const st = settingsRef.current;
     if (st.sound) beep();
-    if (st.vibrate && 'vibrate' in navigator) navigator.vibrate([250, 120, 250, 120, 400]);
-    if (document.hidden && 'Notification' in window && Notification.permission === 'granted') {
-      void navigator.serviceWorker?.ready.then((reg) =>
-        reg.showNotification('Отдых закончился', { body: 'Пора на следующий подход', tag: 'rest-timer' })
-      );
-    }
+    if (st.vibrate) platform.haptics.vibrate([250, 120, 250, 120, 400]);
+    // в нативной оболочке об этом уже сообщило запланированное уведомление; в браузере показываем своё
+    if (document.hidden && !platform.notifications.background) void platform.notifications.show({ title: 'Отдых закончился', body: 'Пора на следующий подход', tag: REST_TAG });
   }, []);
 
   const start = useCallback((sec: number) => {
@@ -139,19 +138,44 @@ export function RestTimerProvider({ children }: { children: ReactNode }) {
   // срабатывание по точному времени (и при возврате в приложение)
   useEffect(() => {
     if (!state || isPausedState(state)) return;
-    const trigger = () => {
+    const trigger = (silent = false) => {
       if (firedFor.current === state.endsAt) return;
       firedFor.current = state.endsAt;
-      fire();
+      if (!silent) fire();
       persist(null);
       setTimeout(() => setState((cur) => (cur && cur.endsAt === state.endsAt ? null : cur)), 1200);
     };
     const ms = state.endsAt - Date.now();
-    const t = setTimeout(trigger, Math.max(0, ms));
-    const onVis = () => { if (document.visibilityState === 'visible' && Date.now() >= state.endsAt) trigger(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => { clearTimeout(t); document.removeEventListener('visibilitychange', onVis); };
+    const t = setTimeout(() => trigger(), Math.max(0, ms));
+    // вернулись после конца отдыха: в нативной оболочке сигнал уже подало уведомление, повторять звук не нужно
+    const offResume = platform.lifecycle.onResume(() => { if (Date.now() >= state.endsAt) trigger(platform.notifications.background); });
+    return () => { clearTimeout(t); offResume(); };
   }, [state, fire]);
+
+  // Нативная оболочка: пока приложение свёрнуто, JS может быть заморожен, поэтому окончание отдыха планируем
+  // системным уведомлением в момент ухода в фон и снимаем при возврате (на экране сигнал подаёт само приложение).
+  const visibleRef = useRef(true);
+  useEffect(() => {
+    if (!platform.notifications.background) return;
+    const apply = () => {
+      const plan = planRestNotification(state, visibleRef.current, Date.now());
+      if (plan.kind === 'schedule') {
+        void platform.notifications.schedule(REST_TAG, plan.at, {
+          title: 'Отдых закончился', body: 'Пора на следующий подход', tag: REST_TAG, channel: 'rest-timer',
+          actions: [{ id: REST_ADD_ACTION, title: `+${REST_ADD_SEC} с` }]
+        });
+      } else void platform.notifications.cancel(REST_TAG);
+    };
+    const offPause = platform.lifecycle.onPause(() => { visibleRef.current = false; apply(); });
+    const offResume = platform.lifecycle.onResume(() => { visibleRef.current = true; apply(); });
+    if (!visibleRef.current) apply(); // состояние изменилось уже после ухода в фон
+    return () => { offPause(); offResume(); };
+  }, [state]);
+
+  // кнопка «+15 с» под уведомлением: запускает ещё один короткий отдых
+  useEffect(() => platform.notifications.onAction((actionId, tag) => {
+    if (tag === REST_TAG && actionId === REST_ADD_ACTION) start(REST_ADD_SEC);
+  }), [start]);
 
   const remainingSec = state ? remainingMs(state, now) / 1000 : 0;
 

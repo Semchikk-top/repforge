@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useEffect, useReducer, useRef, useState, type FormEvent } from 'react';
 import { formatClock } from '../lib';
 import { useRestTimer } from '../state/timer';
 import { Sheet } from '../ui/Sheet';
@@ -7,6 +7,8 @@ import { useToast } from '../ui/Toast';
 import { unlockAudio } from '../nearby/alert';
 import { formatCodeInput, normalizeCode } from '../nearby/code';
 import { relayConfigured } from '../nearby/config';
+import { platform } from '../platform';
+import { RelaySetting } from './RelaySetting';
 import { MAX_NAME, MAX_TEXT, QUICK_PHRASES } from '../nearby/messages';
 import { describePresence } from '../nearby/presence';
 import { REASON_TEXT, room, type ChatMessage, type RoomState } from '../nearby/room';
@@ -42,6 +44,7 @@ function Start() {
   const [name, setName] = useState(loadName);
   const [code, setCode] = useState('');
   const [share, setShare] = useState(true);
+  const [, refresh] = useReducer((n: number) => n + 1, 0);
   const ready = relayConfigured() && webrtcOk();
 
   const go = (fn: () => void) => { unlockAudio(); saveName(name.trim()); fn(); };
@@ -49,7 +52,9 @@ function Start() {
   return (
     <>
       <p className="sub room-lead">Связь с другом по залу: «ты где», «подстрахуй», что он делает сейчас. Сообщения идут напрямую между телефонами, не проходят через сервер и не попадают в дневник.</p>
-      {!relayConfigured() && <p className="room-note">В этой сборке не задан адрес релея (VITE_ROOM_RELAY_URL), поэтому комнату по коду создать нельзя.</p>}
+      {platform.info.native
+        ? <RelaySetting onChange={refresh} />
+        : !relayConfigured() && <p className="room-note">В этой сборке не задан адрес релея (VITE_ROOM_RELAY_URL), поэтому комнату по коду создать нельзя.</p>}
       {relayConfigured() && !webrtcOk() && <p className="room-note">{REASON_TEXT.unsupported}</p>}
 
       <div className="field">

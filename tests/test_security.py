@@ -294,3 +294,74 @@ def test_csp_with_board():
     csp = security.build_csp("wss://relay.example", "https://board.example")
     assert "connect-src 'self' wss://relay.example https://board.example;" in csp
     assert security.build_csp(None, "https://board.example/x") == security.build_csp(None)
+
+
+# ---------- нативная оболочка (Capacitor): origin https://localhost и capacitor://localhost ----------
+# Host — адрес сервера в сети (не localhost): иначе Origin https://localhost совпал бы с ним как «свой» и проверка ничего бы не доказывала.
+NATIVE = "https://localhost"
+LAN = {"Host": "192.168.1.20:8000"}
+
+
+def test_native_preflight_is_answered_with_cors_headers(env):
+    _, client, _ = env
+    r = client.options("/api/sync", headers={**LAN, "Origin": NATIVE, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization,content-type"})
+    assert r.status_code == 204
+    assert r.headers["access-control-allow-origin"] == NATIVE
+    assert "authorization" in r.headers["access-control-allow-headers"]
+    assert "access-control-allow-credentials" not in r.headers
+
+
+def test_foreign_preflight_gets_no_cors_headers(env):
+    _, client, _ = env
+    r = client.options("/api/sync", headers={**LAN, "Origin": "https://evil.example.com", "Access-Control-Request-Method": "POST"})
+    assert "access-control-allow-origin" not in r.headers
+
+
+@pytest.mark.parametrize("origin", ["https://localhost", "capacitor://localhost"])
+def test_native_origin_can_pair_and_sync_even_when_cross_site(env, origin):
+    """Android WebView шлёт Sec-Fetch-Site: cross-site, но Origin у него настоящий и подделать его странице нельзя."""
+    _, client, conn = env
+    code = store.create_pair_code(conn)
+    hdr = {**LAN, "Origin": origin, "Sec-Fetch-Site": "cross-site"}
+    r = client.post("/api/pair", headers=hdr, json={"code": code, "deviceId": "dev-native01", "name": "Телефон (Android)"})
+    assert r.status_code == 200, r.text
+    assert r.headers["access-control-allow-origin"] == origin
+    auth = {**hdr, "Authorization": "Bearer " + r.json()["token"]}
+    s = client.post("/api/sync", headers=auth, json={"since": 0, "entities": []})
+    assert s.status_code == 200 and s.headers["access-control-allow-origin"] == origin
+    assert client.get("/api/devices", headers=auth).headers["access-control-allow-origin"] == origin
+
+
+def test_native_origin_does_not_open_other_origins(env):
+    _, client, conn = env
+    h = pair(client, conn)
+    for origin in ["https://localhost.evil.com", "https://evil.example.com", "null"]:
+        r = client.post("/api/sync", headers={**h, **LAN, "Origin": origin, "Sec-Fetch-Site": "cross-site"}, json={"since": 0, "entities": []})
+        assert r.status_code == 403, origin
+        assert "access-control-allow-origin" not in r.headers
+
+
+def test_native_origin_still_needs_a_token(env):
+    _, client, _ = env
+    r = client.post("/api/sync", headers={**LAN, "Origin": NATIVE}, json={"since": 0, "entities": []})
+    assert r.status_code == 401
+    assert r.headers["access-control-allow-origin"] == NATIVE
+
+
+def test_native_origin_keeps_body_limits_and_content_type(env):
+    _, client, conn = env
+    h = {**pair(client, conn), **LAN, "Origin": NATIVE}
+    big = client.post("/api/sync", headers={**h, "Content-Length": str(64 * 1024 * 1024), "Content-Type": "application/json"}, content=b"{}")
+    assert big.status_code == 413 and big.headers["access-control-allow-origin"] == NATIVE
+    plain = client.post("/api/sync", headers={**h, "Content-Type": "text/plain"}, content=b"{}")
+    assert plain.status_code == 415
+
+
+def test_native_origins_can_be_disabled_or_replaced(env, monkeypatch):
+    _, client, _ = env
+    body = {"deviceId": "dev-aaaaaaaa"}
+    monkeypatch.setenv("WORKOUT_NATIVE_ORIGINS", "")
+    assert client.post("/api/pairing/request", json=body, headers={**LAN, "Origin": NATIVE}).status_code == 403
+    monkeypatch.setenv("WORKOUT_NATIVE_ORIGINS", "https://app.example.org")
+    assert client.post("/api/pairing/request", json=body, headers={**LAN, "Origin": "https://app.example.org"}).status_code == 200
+    assert client.post("/api/pairing/request", json=body, headers={**LAN, "Origin": NATIVE}).status_code == 403

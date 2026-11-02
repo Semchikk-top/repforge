@@ -116,3 +116,95 @@ def test_validation_and_backup(env):
     client.post("/api/sync", json={"since": 0, "entities": [ent("w1", 1)]}, headers=a)
     dest = backup_once(conn, tmp)
     assert sqlite3.connect(dest).execute("SELECT COUNT(*) FROM entities").fetchone()[0] == 1
+
+
+# ---------- версии протокола и схемы (0.11) ----------
+
+def test_health_reports_protocol_and_time(env):
+    client, _, _ = env
+    h = client.get("/api/health").json()
+    assert h["protocol"] >= 1 and h["minClientProtocol"] >= 1
+    assert abs(h["time"] - __import__("time").time() * 1000) < 5000
+
+
+def test_sync_response_has_versions_and_server_time(env):
+    client, conn, _ = env
+    a = pair(client, conn)
+    r = client.post("/api/sync", json={"since": 0, "protocol": 1, "entities": []}, headers=a).json()
+    assert r["protocol"] >= 1 and r["minClientProtocol"] >= 1 and r["schema"] >= 1
+    assert abs(r["serverTime"] - __import__("time").time() * 1000) < 5000
+
+
+def test_legacy_client_without_protocol_is_accepted(env):
+    client, conn, _ = env
+    a = pair(client, conn)
+    r = client.post("/api/sync", json={"since": 0, "entities": [ent("w1", 100)]}, headers=a)
+    assert r.status_code == 200 and r.json()["accepted"] == 1
+
+
+def test_newer_client_gets_server_outdated(env):
+    client, conn, _ = env
+    a = pair(client, conn)
+    r = client.post("/api/sync", json={"since": 0, "protocol": 999, "entities": [ent("w1", 100)]}, headers=a)
+    assert r.status_code == 426 and r.json()["detail"]["code"] == "server_outdated"
+    # запись при этом не принята
+    assert client.post("/api/sync", json={"since": 0, "entities": []}, headers=a).json()["entities"] == []
+
+
+def test_too_old_client_gets_client_outdated(env, monkeypatch):
+    from server import version
+    client, conn, _ = env
+    a = pair(client, conn)
+    monkeypatch.setattr(version, "MIN_CLIENT_PROTOCOL", 2)
+    monkeypatch.setattr(version, "PROTOCOL_VERSION", 2)
+    r = client.post("/api/sync", json={"since": 0, "protocol": 1, "entities": []}, headers=a)
+    assert r.status_code == 426 and r.json()["detail"]["code"] == "client_outdated"
+
+
+def test_diagnostics_requires_auth_and_hides_secrets(env):
+    client, conn, _ = env
+    assert client.get("/api/diagnostics").status_code == 401
+    a = pair(client, conn)
+    client.post("/api/sync", json={"since": 0, "entities": [ent("w1", 100), ent("e1", 100, table="exercises")]}, headers=a)
+    d = client.get("/api/diagnostics", headers=a).json()
+    assert d["entities"]["workouts"] == 1 and d["entities"]["exercises"] == 1
+    assert d["schema"] >= 1 and d["devices"] == 1
+    text = str(d).lower()
+    assert "token" not in text and "hash" not in text
+
+
+def test_new_database_gets_current_schema_version(tmp_path):
+    from server import version
+    conn = store.connect(tmp_path / "n.db")
+    assert store.schema_version(conn) == version.SCHEMA_VERSION
+
+
+def test_database_from_newer_server_is_refused(tmp_path):
+    path = tmp_path / "future.db"
+    conn = store.connect(path)
+    conn.execute("UPDATE meta SET value = '999' WHERE key = 'schema_version'")
+    conn.close()
+    with pytest.raises(store.SchemaTooNew):
+        store.connect(path)
+
+
+def test_legacy_database_without_schema_row_is_adopted(tmp_path):
+    path = tmp_path / "old.db"
+    conn = store.connect(path)
+    conn.execute("DELETE FROM meta WHERE key = 'schema_version'")  # как база до 0.11
+    conn.close()
+    again = store.connect(path)
+    assert store.schema_version(again) >= 1
+
+
+def test_migrations_run_in_order_inside_transaction(tmp_path):
+    path = tmp_path / "m.db"
+    conn = store.connect(path)
+    order = []
+    def two(c): order.append(2); c.execute("CREATE TABLE extra2(x)")
+    def three(c): order.append(3); raise RuntimeError("boom")
+    with pytest.raises(RuntimeError):
+        store._migrate(conn._connection(), target=3, migrations={2: two, 3: three})
+    # шаг 2 применился, шаг 3 откатился целиком
+    assert order == [2, 3] and store.schema_version(conn) == 2
+    assert conn.execute("SELECT name FROM sqlite_master WHERE name = 'extra2'").fetchone()

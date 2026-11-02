@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { backupJson, download, routesGpx, workoutsCsv } from '../db/exporter';
+import { encryptBackup } from '../db/backupCrypto';
 import { addDays, toDateStr } from '../lib';
 import { useSettings } from '../state/settings';
 import { Sheet } from '../ui/Sheet';
@@ -17,6 +18,9 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
   const [from, setFrom] = useState(toDateStr(addDays(new Date(), -30)));
   const [to, setTo] = useState(toDateStr(new Date()));
   const today = new Date();
+  const [encrypt, setEncrypt] = useState(false);
+  const [pass, setPass] = useState('');
+  const passBad = encrypt && pass.length < 6;
 
   const range = (): { from?: string; to?: string } => {
     if (preset === 'all') return {};
@@ -40,7 +44,22 @@ export function ExportSheet({ onClose }: { onClose: () => void }) {
       )}
       {bad && <p className="msg-error">Дата начала позже даты окончания.</p>}
       <div className="export-list">
-        <button className="btn block" disabled={bad} onClick={async () => { download(`trenirovki-${tag()}.json`, await backupJson(range()), 'application/json'); toast('Резервная копия сохранена'); }}>Резервная копия (JSON)</button>
+        <label className="row" style={{ gap: 10, alignItems: 'center' }}>
+          <input type="checkbox" checked={encrypt} onChange={(e) => setEncrypt(e.target.checked)} />
+          <span>Зашифровать резервную копию паролем</span>
+        </label>
+        {encrypt && (
+          <div className="field">
+            <input className="input" type="password" autoComplete="new-password" placeholder="Пароль (не короче 6 символов)" aria-label="Пароль копии" value={pass} onChange={(e) => setPass(e.target.value)} />
+            <span className="sub">Забытый пароль восстановить нельзя: без него копию не открыть.</span>
+          </div>
+        )}
+        <button className="btn block" disabled={bad || passBad} onClick={async () => {
+          const json = await backupJson(range());
+          if (encrypt) download(`trenirovki-${tag()}-enc.json`, await encryptBackup(json, { kind: 'password', pass }), 'application/json');
+          else download(`trenirovki-${tag()}.json`, json, 'application/json');
+          toast(encrypt ? 'Зашифрованная копия сохранена' : 'Резервная копия сохранена');
+        }}>Резервная копия (JSON)</button>
         <p className="sub">Можно импортировать обратно. Содержит тренировки, маршруты и замеры за период, а также справочник и шаблоны.</p>
         <button className="btn block" disabled={bad} onClick={async () => { download(`trenirovki-${tag()}.csv`, await workoutsCsv(range()), 'text/csv;charset=utf-8'); toast('Таблица сохранена'); }}>Таблица тренировок (CSV)</button>
         <p className="sub">Каждый подход отдельной строкой: открывается в Excel и Google Таблицах.</p>

@@ -8,7 +8,7 @@ from playwright.sync_api import expect, sync_playwright
 from tests.ui.fake_gps import FAKE_GPS
 
 BASE = os.environ.get("BASE_URL", "http://127.0.0.1:8767/")
-VERSION = json.loads((Path(__file__).resolve().parents[2] / "package.json").read_text())["version"]
+VERSION = json.loads((Path(__file__).resolve().parents[2] / "package.json").read_text())["version"].split("-")[0]  # на экране без суффикса «-alpha»
 errors = []
 SPEECH = """
 window.__spoken = [];

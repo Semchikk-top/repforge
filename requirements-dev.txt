@@ -1,0 +1,5 @@
+# Всё, что нужно для тестов сервера и сервиса рейтинга: pip install -r requirements-dev.txt
+-r server/requirements.txt
+-r board/requirements.txt
+pytest>=8
+httpx>=0.27

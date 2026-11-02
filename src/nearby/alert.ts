@@ -1,3 +1,4 @@
+import { platform } from '../platform';
 // Сигнал «Позвать»: вибрация и звук. Звук разрешён браузером только после касания, поэтому
 // unlockAudio() вызывается из обработчика кнопки «Создать комнату»/«Присоединиться».
 
@@ -32,5 +33,5 @@ export function playCallSound(): void {
 }
 
 export function vibrateCall(): void {
-  if ('vibrate' in navigator) navigator.vibrate([300, 150, 300, 150, 500]);
+  platform.haptics.vibrate([300, 150, 300, 150, 500]);
 }

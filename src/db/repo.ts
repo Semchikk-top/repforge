@@ -1,6 +1,9 @@
 import { db } from './db';
 import { uid, newId, toDateStr } from '../lib';
-import { DEFAULT_SETTINGS, type BodyEntry, type Exercise, type Settings, type Program, type Template, type Track, type Workout } from '../domain/types';
+import { checkInId, normalizeCheckIn, type CheckInDraft } from '../domain/checkin';
+import type { ImportPlan } from '../domain/importWorkouts';
+import type { StarterPlan } from '../domain/starter';
+import { DEFAULT_SETTINGS, type BodyEntry, type CheckIn, type CheckInSlot, type Exercise, type Settings, type Program, type Template, type Track, type Workout } from '../domain/types';
 import type { ProfileRow } from '../social/types';
 import type { GameRow } from '../game/types';
 import { SEED_EXERCISES } from '../domain/seed';
@@ -59,7 +62,7 @@ export async function duplicateWorkout(id: string, date?: string): Promise<Worko
 }
 
 // ---------- запись с журналом изменений ----------
-type TableName = 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game';
+type TableName = 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game' | 'checkins';
 
 // Очередь отправки хранит не шаги правки, а «эта запись изменилась»: на сервер уходит сама запись целиком
 // в её последнем виде. Поэтому правки одной записи схлопываются в одну строку очереди: вес 50 → 60 тремя
@@ -123,6 +126,89 @@ export async function putBody(b: Input<BodyEntry>) {
     await logChange('body', row.id, 'put', deviceId);
   });
   return row;
+}
+
+/**
+ * Сохранить чек-ин. Запись одна на дату и слот: id берётся из пары, поэтому повторное сохранение правит ту же запись,
+ * а удалённая ранее запись «оживает». Не прошедший проверку черновик отклоняется (null).
+ */
+export async function saveCheckIn(draft: CheckInDraft): Promise<CheckIn | null> {
+  const d = normalizeCheckIn(draft);
+  if (!d) return null;
+  const deviceId = await getDeviceId();
+  const id = checkInId(d.date, d.slot);
+  return db.transaction('rw', db.checkins, db.changes, async () => {
+    // Запись с этой датой и слотом могла появиться под другим id (импорт, ручная правка): правим её, а не заводим вторую.
+    const dup = await db.checkins.where('[date+slot]').equals([d.date, d.slot]).first();
+    const prev = dup ?? (await db.checkins.get(id));
+    const row: CheckIn = { ...d, id: prev?.id ?? id, createdAt: prev?.createdAt ?? Date.now(), updatedAt: Date.now(), deviceId, deletedAt: null };
+    await db.checkins.put(row);
+    await logChange('checkins', row.id, 'put', deviceId);
+    return row;
+  });
+}
+
+export async function deleteCheckIn(date: string, slot: CheckInSlot): Promise<void> {
+  const deviceId = await getDeviceId();
+  await db.transaction('rw', db.checkins, db.changes, async () => {
+    const cur = await db.checkins.where('[date+slot]').equals([date, slot]).first();
+    if (!cur || cur.deletedAt) return;
+    await db.checkins.put({ ...cur, deletedAt: Date.now(), updatedAt: Date.now(), deviceId });
+    await logChange('checkins', cur.id, 'put', deviceId);
+  });
+}
+
+/**
+ * Записать подтверждённый план импорта. Только создаёт записи: если запись с таким id уже есть, она остаётся нетронутой.
+ * Пока в плане есть неразрешённые упражнения, писать нечего: это ошибка вызова, а не молчаливый пропуск.
+ */
+export async function applyImportPlan(plan: ImportPlan): Promise<{ workouts: number; exercises: number; skipped: number }> {
+  if (plan.unresolved.length) throw new Error('Не для всех упражнений выбрано решение');
+  const deviceId = await getDeviceId();
+  const now = Date.now();
+  let workouts = 0, exercises = 0, skipped = 0;
+  await db.transaction('rw', db.exercises, db.workouts, db.changes, async () => {
+    for (const e of plan.newExercises) {
+      if (await db.exercises.get(e.id)) continue;
+      await db.exercises.put({ id: e.id, name: e.name, muscle: e.muscle, equipment: '', custom: true, createdAt: now, updatedAt: now, deviceId });
+      await logChange('exercises', e.id, 'put', deviceId);
+      exercises++;
+    }
+    for (const w of plan.workouts) {
+      if (await db.workouts.get(w.id)) { skipped++; continue; }
+      await db.workouts.put({ ...w, createdAt: now, updatedAt: now, deviceId });
+      await logChange('workouts', w.id, 'put', deviceId);
+      workouts++;
+    }
+  });
+  return { workouts, exercises, skipped };
+}
+
+/**
+ * Создать выбранную стартовую программу: недостающие упражнения, по шаблону на каждую тренировку и саму программу.
+ * Всё в одной транзакции, чтобы не осталось полусозданной программы. Существующие упражнения не меняются.
+ */
+export async function applyStarterPlan(plan: StarterPlan, startDate: string, weeks = 8): Promise<string> {
+  const deviceId = await getDeviceId();
+  const now = Date.now();
+  const programId = uid();
+  await db.transaction('rw', db.exercises, db.templates, db.programs, db.changes, async () => {
+    for (const e of plan.newExercises) {
+      if (await db.exercises.get(e.id)) continue;
+      await db.exercises.put({ id: e.id, name: e.name, muscle: e.muscle, equipment: e.equipment, custom: true, createdAt: now, updatedAt: now, deviceId });
+      await logChange('exercises', e.id, 'put', deviceId);
+    }
+    const days: Program['days'] = [];
+    for (const [i, s] of plan.sessions.entries()) {
+      const id = uid();
+      await db.templates.put({ id, title: s.title, exercises: s.exercises.map((x) => ({ exerciseId: x.exerciseId, sets: x.sets, reps: x.reps, weight: 0 })), createdAt: now, updatedAt: now, deviceId });
+      await logChange('templates', id, 'put', deviceId);
+      days.push({ weekday: plan.weekdays[i], templateId: id });
+    }
+    await db.programs.put({ id: programId, title: plan.title, startDate, weeks, days, createdAt: now, updatedAt: now, deviceId });
+    await logChange('programs', programId, 'put', deviceId);
+  });
+  return programId;
 }
 
 export async function putTrack(t: Input<Track>) {
@@ -265,7 +351,7 @@ export async function ensureSeeds() {
 
 // ---------- экспорт / импорт ----------
 export async function exportAll(): Promise<string> {
-  const [exercises, workouts, templates, tracks, body, programs, game, settings] = await Promise.all([
+  const [exercises, workouts, templates, tracks, body, programs, game, checkins, settings] = await Promise.all([
     db.exercises.toArray(),
     db.workouts.toArray(),
     db.templates.toArray(),
@@ -273,9 +359,10 @@ export async function exportAll(): Promise<string> {
     db.body.toArray(),
     db.programs.toArray(),
     db.game.toArray(),
+    db.checkins.toArray(),
     loadSettings()
   ]);
-  return JSON.stringify({ version: 1, exportedAt: Date.now(), exercises, workouts, templates, tracks, body, programs, game, settings }, null, 2);
+  return JSON.stringify({ version: 1, exportedAt: Date.now(), exercises, workouts, templates, tracks, body, programs, game, checkins, settings }, null, 2);
 }
 
 export async function importAll(json: string): Promise<{ exercises: number; workouts: number; templates: number }> {
@@ -283,7 +370,7 @@ export async function importAll(json: string): Promise<{ exercises: number; work
   if (!data || data.version !== 1) throw new Error('Неизвестный формат файла');
   const deviceId = await getDeviceId();
   let ex = 0, wk = 0, tp = 0;
-  await db.transaction('rw', [db.exercises, db.workouts, db.templates, db.tracks, db.body, db.programs, db.game, db.changes], async () => {
+  await db.transaction('rw', [db.exercises, db.workouts, db.templates, db.tracks, db.body, db.programs, db.game, db.checkins, db.changes], async () => {
     // Импорт по правилу «побеждает более свежая запись»
     for (const e of (data.exercises ?? []) as Exercise[]) {
       const cur = await db.exercises.get(e.id);
@@ -308,6 +395,11 @@ export async function importAll(json: string): Promise<{ exercises: number; work
     for (const g of (data.game ?? []) as GameRow[]) {
       const cur = await db.game.get(g.id);
       if (!cur || cur.updatedAt < g.updatedAt) { await db.game.put(g); await logChange('game', g.id, 'put', deviceId); }
+    }
+    for (const c of (data.checkins ?? []) as CheckIn[]) {
+      if (!c || typeof c.id !== 'string' || (c.slot !== 'morning' && c.slot !== 'evening')) continue; // чужой или битый файл: пропускаем запись
+      const cur = await db.checkins.get(c.id);
+      if (!cur || cur.updatedAt < c.updatedAt) { await db.checkins.put(c); await logChange('checkins', c.id, 'put', deviceId); }
     }
     for (const t of (data.tracks ?? []) as Track[]) {
       const cur = await db.tracks.get(t.id);

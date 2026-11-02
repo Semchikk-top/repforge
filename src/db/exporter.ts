@@ -1,15 +1,12 @@
 import { db } from './db';
+import { platform } from '../platform';
 import { exportAll } from './repo';
 import { filterBackup, workoutsToCsv, type Range } from '../domain/exportData';
 import { toMultiGpx } from '../cardio/gpx';
 import type { Exercise } from '../domain/types';
 
 export function download(name: string, content: string | Blob, type: string) {
-  const url = URL.createObjectURL(content instanceof Blob ? content : new Blob([content], { type }));
-  const a = document.createElement('a');
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  void platform.files.save(name, type, content).catch(() => { /* пользователь закрыл окно «Поделиться» */ });
 }
 
 /** Резервная копия за период (формат тот же, что у полного экспорта, её можно импортировать) */

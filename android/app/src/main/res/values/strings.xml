@@ -1,0 +1,9 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">repforge</string>
+    <string name="title_activity_main">repforge</string>
+    <string name="package_name">app.repforge.workout</string>
+    <string name="custom_url_scheme">app.repforge.workout</string>
+    <!-- значок постоянного уведомления фоновой записи маршрута (плагин background-geolocation) -->
+    <string name="capacitor_background_geolocation_notification_icon">drawable/ic_stat_workout</string>
+</resources>

@@ -2,19 +2,15 @@ import { useCallback, useEffect, useState } from 'react';
 import { db } from '../db/db';
 import type { Workout } from '../domain/types';
 import { todayStr } from '../lib';
+import { platform } from '../platform';
 import { useSettings } from './settings';
 
 const NOTIFIED = 'reminder.notified';
 const DISMISSED = 'reminder.dismissed';
 
 async function notify(w: Workout) {
-  if (!('Notification' in window) || Notification.permission !== 'granted') return;
-  const body = `Сегодня по плану: ${w.title}`;
-  try {
-    const reg = await navigator.serviceWorker?.ready;
-    if (reg) await reg.showNotification('Пора тренироваться', { body, tag: 'workout-reminder', icon: 'icon-192.png' });
-    else new Notification('Пора тренироваться', { body });
-  } catch { /* уведомление необязательно */ }
+  if (platform.notifications.background) return; // уже запланировано заранее: см. reminderSchedule.ts
+  await platform.notifications.show({ title: 'Пора тренироваться', body: `Сегодня по плану: ${w.title}`, tag: 'workout-reminder', icon: 'icon-192.png', channel: 'reminders' });
 }
 
 /** Напоминание о тренировке по плану. Фоновых push-уведомлений нет: сообщение появляется, пока приложение открыто или свёрнуто. */
@@ -40,9 +36,8 @@ export function useReminder(): { due: Workout | null; dismiss: () => void } {
       timer = window.setTimeout(() => void check(), now < at ? Math.min(60000, at.getTime() - now.getTime() + 500) : 60000);
     };
     void check();
-    const onVis = () => { if (document.visibilityState === 'visible') void check(); };
-    document.addEventListener('visibilitychange', onVis);
-    return () => { alive = false; window.clearTimeout(timer); document.removeEventListener('visibilitychange', onVis); };
+    const offResume = platform.lifecycle.onResume(() => void check());
+    return () => { alive = false; window.clearTimeout(timer); offResume(); };
   }, [ready, settings.reminderEnabled, settings.reminderTime]);
 
   const dismiss = useCallback(() => { setDue(null); void db.kv.put({ key: DISMISSED, value: todayStr() }); }, []);

@@ -1,42 +1,38 @@
-# Node
+# зависимости и сборка
 node_modules/
 dist/
-*.log
-npm-debug.log*
-
-# TypeScript
+dist-ssr/
 *.tsbuildinfo
 
 # Python
-.venv/
 __pycache__/
-*.pyc
+*.py[cod]
+.venv/
+venv/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
 
-# Данные и секреты — НИКОГДА не коммитить
-app/data/
+# данные и секреты: никогда не коммитить
+data/
 *.db
 *.db-wal
 *.db-shm
 .env
-.env.*
-!.env.example
-backups/
+deploy/env
 
-# Capacitor (появится позже)
-app/android/.gradle/
-app/android/app/build/
-app/android/local.properties
-app/ios/Pods/
-app/ios/App/build/
-app/ios/App/App.xcworkspace/xcuserdata/
-app/ios/App/App.xcodeproj/xcuserdata/
+# нативная сборка и подписи
+android/build/
+android/app/build/
+android/app/release/
+android/.gradle/
+android/.kotlin/
+android/local.properties
+*.keystore
+*.jks
+android/keystore.properties
+android/*.jks
+android/*.keystore
 
-# ОС и редакторы
-.DS_Store
-Thumbs.db
+# редакторы и система
 .idea/
 .vscode/
-*.swp
+.DS_Store

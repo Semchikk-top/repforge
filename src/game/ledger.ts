@@ -6,6 +6,12 @@ import { SLOTS, type GameRow, type Slot } from './types';
 
 const MAX_NUM = 1_000_000;
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? Math.min(MAX_NUM, Math.max(0, Math.round(v))) : 0);
+/**
+ * Момент времени в миллисекундах. Не num(): тот режет значение до миллиона (защита от раздутых опыта и монет),
+ * и любая дата превращалась в 1 января 1970. Некорректное значение даёт 0, и вызывающий берёт запасное.
+ */
+const ts = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) && v > 0 && v <= MAX_TS ? Math.round(v) : 0);
+const MAX_TS = 8.64e15; // предел Date
 
 export interface Totals {
   xp: number; coins: number; earned: number; spent: number;
@@ -27,7 +33,10 @@ export function totalsOf(rows: GameRow[]): Totals {
     else if (r.kind === 'achievement') {
       if (!ACH_BY_ID.has(r.achId)) continue;
       xp += num(r.xp); earned += num(r.coins);
-      unlocked.set(r.achId, num(r.at) || r.updatedAt);
+      // одно достижение могло записаться на двух устройствах: помним самое раннее получение
+      const at = ts(r.at) || ts(r.createdAt) || ts(r.updatedAt);
+      const prev = unlocked.get(r.achId);
+      unlocked.set(r.achId, prev && (!at || prev < at) ? prev : at);
     } else if (r.kind === 'purchase') {
       if (!ITEM_BY_ID.has(r.itemId) || bought.has(r.itemId)) continue;
       bought.add(r.itemId);

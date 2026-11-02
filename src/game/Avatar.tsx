@@ -1,4 +1,5 @@
 import { useRef, useState, type CSSProperties } from 'react';
+import { platform } from '../platform';
 import { Glyph } from './glyphs';
 import { DEFAULTS, ITEM_BY_ID, type AvatarItem, type FrameItem } from './catalog';
 
@@ -24,7 +25,7 @@ export function Avatar({ avatarId = DEFAULTS.avatar, frameId = DEFAULTS.frame, n
     setPoke((n) => n + 1);
     window.clearTimeout(timer.current);
     timer.current = window.setTimeout(() => setPoke(0), 700);
-    if (navigator.vibrate) navigator.vibrate(12);
+    platform.haptics.vibrate(12);
   };
 
   const body = (

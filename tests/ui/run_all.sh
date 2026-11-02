@@ -25,4 +25,5 @@ run cardio_test ""
 run update_test ""
 run alpha2_test ""
 run alpha3_test ""
+run today_test ""
 exit $fail

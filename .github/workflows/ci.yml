@@ -1,0 +1,109 @@
+# Проверки на каждый пуск и запрос на слияние. Локально то же самое:
+#   npm run typecheck && npm test && npm run test:relay && npm run build
+#   pip install -r requirements-dev.txt && python -m pytest tests --ignore=tests/ui
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 * * 1"   # по понедельникам
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  web:
+    name: Клиент (типы, тесты, сборка)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # главный чанк не должен незаметно разрастись: порог с запасом над текущим (≈460 КБ)
+      - name: Размер главного чанка
+        run: |
+          size=$(stat -c %s dist/assets/index-*.js)
+          echo "index.js: $((size / 1024)) КБ"
+          test "$size" -lt $((520 * 1024)) || { echo "Главный чанк больше 520 КБ: вынеси редкий экран в React.lazy"; exit 1; }
+
+  server:
+    name: Сервер (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.12 проверяет текущие версии библиотек, 3.13 — запас на обновление системного Python
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: |
+            requirements-dev.txt
+            server/requirements.txt
+            board/requirements.txt
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -q tests --ignore=tests/ui
+
+  server-pinned:
+    name: Сервер на закреплённых версиях
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r server/requirements.lock pytest
+      # сервис рейтинга (board) ставится отдельно со своим lock-файлом и здесь не проверяется
+      - run: python -m pytest -q tests --ignore=tests/ui --ignore=tests/test_board.py
+
+  relay:
+    name: Релей «Рядом»
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  # Сквозные тесты в настоящем браузере: долгие и капризные, поэтому не на каждый пуск, а по расписанию и вручную.
+  ui:
+    name: Интерфейс в браузере (по расписанию и вручную)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: npm ci && npm run build
+      - run: pip install -r requirements-dev.txt playwright && playwright install --with-deps chromium
+      - run: bash tests/ui/run_all.sh

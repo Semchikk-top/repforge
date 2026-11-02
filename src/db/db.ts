@@ -1,8 +1,16 @@
 import Dexie, { type Table } from 'dexie';
-import type { BodyEntry, ChangeRecord, ConflictRecord, Exercise, Photo, Program, Template, Track, Workout } from '../domain/types';
+import type { BodyEntry, ChangeRecord, CheckIn, ConflictRecord, Exercise, Photo, Program, Template, Track, Workout } from '../domain/types';
 import { SEED_EXERCISES } from '../domain/seed';
 import type { Friend, PeerSnapshotRow, ProfileRow } from '../social/types';
 import type { GameRow } from '../game/types';
+
+export interface SyncBase {
+  /** `таблица/id записи`, например workouts/abc */
+  id: string;
+  table: string;
+  data: Record<string, unknown>;
+  at: number;
+}
 
 export interface KV {
   key: string;
@@ -26,6 +34,10 @@ class AppDB extends Dexie {
   peerSnapshots!: Table<PeerSnapshotRow, string>;
   // Игровой журнал (опыт, монеты, достижения, покупки): синхронизируется между устройствами
   game!: Table<GameRow, string>;
+  // Чек-ины самочувствия (0.8): синхронизируются, один слот на дату
+  checkins!: Table<CheckIn, string>;
+  // Общий предок для слияния тренировок (0.11): какой версию записи отдал сервер в последний раз. Только на устройстве.
+  bases!: Table<SyncBase, string>;
 
   constructor() {
     super('workout-pwa');
@@ -80,6 +92,10 @@ class AppDB extends Dexie {
     this.version(6).stores({ profile: 'id', friends: 'profileId, status', peerSnapshots: 'id, profileId' });
     // v7: игровой журнал (геймификация, 0.6)
     this.version(7).stores({ game: 'id, kind, updatedAt' });
+    // v8: чек-ины самочувствия (0.8)
+    this.version(8).stores({ checkins: 'id, date, [date+slot], updatedAt' });
+    // v9: общие предки для слияния тренировок по подходам (0.11)
+    this.version(9).stores({ bases: 'id, at' });
   }
 }
 

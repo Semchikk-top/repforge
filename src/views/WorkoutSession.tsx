@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { newTemplateFromWorkout, putWorkout, softDelete } from '../db/repo';
@@ -6,7 +6,6 @@ import { lastPerformance, workoutSetsCount, workoutVolume } from '../domain/anal
 import { makeSet, makeWorkoutExercise } from '../domain/ops';
 import { SET_KIND_LABELS, SET_KIND_SHORT, isCardio, type CardioEntry, type Exercise, type SetEntry, type SetKind, type Workout, type WorkoutExercise } from '../domain/types';
 import { groupInfo, linkWithNext, restAfter, splitAfter } from '../domain/superset';
-import { CardioBlock } from '../cardio/CardioBlock';
 import { suggestNext } from '../domain/progression';
 import { PlateSheet } from '../ui/PlateSheet';
 import { formatKm } from '../cardio/geo';
@@ -19,13 +18,18 @@ import { reconcileGame, type Reconciled } from '../game/store';
 import { Glyph } from '../game/glyphs';
 import { useWakeLock } from '../state/wakelock';
 import { ExercisePicker } from '../ui/ExercisePicker';
-import { IconBack, IconCheck, IconNearby, IconSpark, IconTrash } from '../ui/Icons';
+import { IconBack, IconCheck, IconNearby, IconSpark, IconSwap, IconTrash } from '../ui/Icons';
+import { swapExercise } from '../domain/swap';
+import { SwapSheet } from './SwapSheet';
 import { useRoomUi } from '../nearby/RoomProvider';
 import { useRoom } from '../nearby/useRoom';
 import { Sheet } from '../ui/Sheet';
 import { CountUp } from '../ui/CountUp';
 import { Stepper } from '../ui/Stepper';
 import { useToast } from '../ui/Toast';
+
+// GPS-запись, карта и ручной ввод кардио нужны только в кардио-упражнении: грузим при первом показе
+const CardioBlock = lazy(() => import('../cardio/CardioBlock').then((m) => ({ default: m.CardioBlock })));
 
 export function WorkoutSession({ id }: { id: string }) {
   const { settings } = useSettings();
@@ -41,6 +45,7 @@ export function WorkoutSession({ id }: { id: string }) {
   const exMap = useMemo(() => new Map(exList.map((e) => [e.id, e])), [exList]);
 
   const [picker, setPicker] = useState(false);
+  const [swapping, setSwapping] = useState<string | null>(null); // id записи упражнения, которое заменяем
   const [summary, setSummary] = useState(false);
   const [reward, setReward] = useState<Reconciled | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -119,6 +124,22 @@ export function WorkoutSession({ id }: { id: string }) {
     if (!confirm(`Убрать «${name}» из тренировки?`)) return;
     if (we.cardio?.trackId) void softDelete('tracks', we.cardio.trackId);
     void save({ exercises: workout.exercises.filter((x) => x.id !== we.id) });
+  };
+
+  const doSwap = async (weId: string, next: Exercise) => {
+    setSwapping(null);
+    // свежая запись из базы и общая очередь записи: как у остальных правок тренировки
+    const run = async () => {
+      const cur = (await db.workouts.get(workout.id)) ?? workout;
+      const r = swapExercise(cur, weId, next, history, exMap);
+      if (!r.ok) return r;
+      await putWorkout(r.workout);
+      return r;
+    };
+    const p = writeQueue.current.then(run, run);
+    writeQueue.current = p.catch(() => undefined);
+    const r = await p;
+    toast(r.ok ? `Заменено на «${next.name}»${r.mode === 'split' ? ': выполненные подходы остались у прежнего' : ''}` : r.reason === 'nothing-left' ? 'Все подходы уже выполнены, заменять нечего' : r.reason === 'cardio' ? 'Кардио заменить нельзя' : 'Не удалось заменить');
   };
 
   const addExercises = (ids: string[]) => {
@@ -202,15 +223,18 @@ export function WorkoutSession({ id }: { id: string }) {
                   </div>
                 )}
               </div>
+              {!cardio && <button className="icon-btn" aria-label="Заменить упражнение" onClick={() => setSwapping(we.id)}><IconSwap size={20} /></button>}
               <button className="icon-btn" aria-label="Убрать упражнение" onClick={() => removeExercise(we)}><IconTrash size={20} /></button>
             </div>
 
             {cardio && (
-              <CardioBlock
-                workout={workout} we={we} exercise={ex} history={history}
-                onBegin={() => { if (workout.status === 'planned') void start(); }}
-                onSave={(c: CardioEntry | undefined) => updateExercise(we.id, (x) => ({ ...x, cardio: c }))}
-              />
+              <Suspense fallback={<p className="sub">Загрузка…</p>}>
+                <CardioBlock
+                  workout={workout} we={we} exercise={ex} history={history}
+                  onBegin={() => { if (workout.status === 'planned') void start(); }}
+                  onSave={(c: CardioEntry | undefined) => updateExercise(we.id, (x) => ({ ...x, cardio: c }))}
+                />
+              </Suspense>
             )}
 
             {!cardio && we.sets.map((s, i) => (
@@ -287,6 +311,11 @@ export function WorkoutSession({ id }: { id: string }) {
       <button className="btn danger ghost block" style={{ marginTop: 10 }} onClick={remove}>Удалить тренировку</button>
 
       {picker && <ExercisePicker multi onPick={addExercises} onClose={() => setPicker(false)} />}
+      {swapping && (() => {
+        const we = workout.exercises.find((x) => x.id === swapping);
+        const target = we && exMap.get(we.exerciseId);
+        return target ? <SwapSheet target={target} all={exList} history={history} present={new Set(workout.exercises.map((x) => x.exerciseId))} onPick={(e) => void doSwap(swapping, e)} onClose={() => setSwapping(null)} /> : null;
+      })()}
       {plates !== null && <PlateSheet initialWeight={plates} onClose={() => setPlates(null)} />}
       {summary && <FinishSheet workout={workout} reward={reward} onClose={() => { setSummary(false); go('calendar'); }} />}
     </div>

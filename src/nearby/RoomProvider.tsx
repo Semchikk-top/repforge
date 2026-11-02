@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, lazy, Suspense, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { isCardio, type Exercise, type Workout } from '../domain/types';
@@ -6,11 +6,12 @@ import { useSettings } from '../state/settings';
 import { useRestTimer } from '../state/timer';
 import { useWakeLock } from '../state/wakelock';
 import { useToast } from '../ui/Toast';
-import { RoomSheet } from '../views/RoomSheet';
 import { playCallSound, vibrateCall } from './alert';
 import { buildPresence, type PresenceWorkout } from './presence';
 import { room } from './room';
 import { isInRoom, useRoom } from './useRoom';
+
+const RoomSheet = lazy(() => import('../views/RoomSheet').then((m) => ({ default: m.RoomSheet })));
 
 interface RoomUi { openSheet(): void; closeSheet(): void; open: boolean }
 const Ctx = createContext<RoomUi>({ openSheet: () => {}, closeSheet: () => {}, open: false });
@@ -90,7 +91,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   return (
     <Ctx.Provider value={{ openSheet, closeSheet, open }}>
       {children}
-      {open && <RoomSheet onClose={closeSheet} />}
+      {open && <Suspense fallback={null}><RoomSheet onClose={closeSheet} /></Suspense>}
     </Ctx.Provider>
   );
 }

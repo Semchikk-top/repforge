@@ -41,7 +41,7 @@ with sync_playwright() as p:
     # --- тумблеры: реальные клики по координатам
     toggles = page.locator(".toggle")
     n = toggles.count()
-    check("найдено 5 тумблеров", n == 5, n)
+    check("найдено 8 тумблеров", n == 8, n)
     for i in range(n):
         inp = toggles.nth(i).locator("input")
         before = inp.is_checked()

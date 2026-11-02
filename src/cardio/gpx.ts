@@ -39,7 +39,7 @@ export function toGpx(name: string, startMs: number, track: TrackPoint[], zoneM 
     return `      <trkpt lat="${p.lat.toFixed(5)}" lon="${p.lon.toFixed(5)}">${ele}<time>${new Date(startMs + p.t * 1000).toISOString()}</time></trkpt>`;
   }).join('\n');
   return `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="Тренировки" xmlns="http://www.topografix.com/GPX/1/1">
+<gpx version="1.1" creator="repforge" xmlns="http://www.topografix.com/GPX/1/1">
   <metadata><name>${escapeXml(name)}</name><time>${new Date(startMs).toISOString()}</time></metadata>
   <trk>
     <name>${escapeXml(name)}</name>
@@ -62,5 +62,5 @@ export function toMultiGpx(items: { name: string; startMs: number; track: TrackP
     }).join('\n');
     return `  <trk>\n    <name>${escapeXml(it.name)}</name>\n    <trkseg>\n${seg}\n    </trkseg>\n  </trk>`;
   }).filter(Boolean).join('\n');
-  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Тренировки" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>Маршруты</name></metadata>\n${trks}\n</gpx>\n`;
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="repforge" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>Маршруты</name></metadata>\n${trks}\n</gpx>\n`;
 }

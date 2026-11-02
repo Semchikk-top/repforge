@@ -23,7 +23,9 @@ mkdir -p ~/.config/systemd/user
 esc=$(printf '%s' "$PWD" | sed -e 's/[\\&|]/\\&/g')
 sed "s|%h/workout-app|$esc|g" deploy/workout.service > ~/.config/systemd/user/workout.service
 systemctl --user daemon-reload
-systemctl --user enable --now workout
+systemctl --user enable workout
+# restart, а не только start: при обновлении сервис уже запущен и иначе продолжил бы работать на старом коде
+systemctl --user restart workout
 loginctl enable-linger "$USER" || true
 
 cat << MSG

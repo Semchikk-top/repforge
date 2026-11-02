@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import db as store
-from . import mdns, netinfo, pairing, qr, security
+from . import mdns, netinfo, pairing, qr, security, version
 from .assistant import agent, config as acfg, providers
 
 DIST_DIR = Path(os.environ.get("WORKOUT_DIST_DIR", Path(__file__).resolve().parent.parent / "dist"))
@@ -99,6 +99,8 @@ class TestIn(BaseModel):
 
 class SyncIn(BaseModel):
     since: int = Field(default=0, ge=0)
+    # версия протокола клиента; старые клиенты (до 0.11) её не присылают и считаются совместимыми
+    protocol: int | None = Field(default=None, ge=0, le=10_000)
     entities: list[EntityIn] = Field(default_factory=list, max_length=MAX_BATCH)
 
 
@@ -163,7 +165,41 @@ def make_app(db_path: Path | None = None) -> FastAPI:
 
     @app.get("/api/health")
     def health():
-        return {"ok": True, "seq": store.current_seq(conn), "instance": store.instance_id(conn)}
+        return {
+            "ok": True,
+            "seq": store.current_seq(conn),
+            "instance": store.instance_id(conn),
+            "protocol": version.PROTOCOL_VERSION,
+            "minClientProtocol": version.MIN_CLIENT_PROTOCOL,
+            "time": int(time.time() * 1000),
+        }
+
+    @app.get("/api/diagnostics")
+    def diagnostics(dev: sqlite3.Row = Depends(auth)):
+        """Сведения для экрана диагностики в приложении. Только для подключённых устройств; без токенов и содержимого записей."""
+        counts = {r["table_name"]: r["n"] for r in conn.execute(
+            "SELECT table_name, COUNT(*) AS n FROM entities WHERE deleted = 0 GROUP BY table_name")}
+        deleted = conn.execute("SELECT COUNT(*) AS n FROM entities WHERE deleted = 1").fetchone()["n"]
+        devices = conn.execute("SELECT COUNT(*) AS n FROM devices WHERE revoked = 0").fetchone()["n"]
+        try:
+            db_bytes = (db_path or store.DB_PATH).stat().st_size
+        except OSError:
+            db_bytes = None
+        return {
+            "serverVersion": version.app_version(),
+            "protocol": version.PROTOCOL_VERSION,
+            "minClientProtocol": version.MIN_CLIENT_PROTOCOL,
+            "schema": store.schema_version(conn),
+            "python": sys.version.split()[0],
+            "instance": store.instance_id(conn),
+            "seq": store.current_seq(conn),
+            "time": int(time.time() * 1000),
+            "entities": counts,
+            "deletedEntities": deleted,
+            "devices": devices,
+            "dbBytes": db_bytes,
+            "backups": len(list((store.DATA_DIR / "backups").glob("workout-*.db"))),
+        }
 
     @app.post("/api/pair")
     def pair(body: PairIn, request: Request):
@@ -178,6 +214,13 @@ def make_app(db_path: Path | None = None) -> FastAPI:
 
     @app.post("/api/sync")
     def sync(body: SyncIn, dev: sqlite3.Row = Depends(auth)):
+        client_protocol = body.protocol if body.protocol is not None else version.MIN_CLIENT_PROTOCOL
+        if client_protocol < version.MIN_CLIENT_PROTOCOL:
+            raise HTTPException(426, {"code": "client_outdated", "message": "Приложение слишком старое для этого сервера: обнови приложение.",
+                                      "protocol": version.PROTOCOL_VERSION, "minClientProtocol": version.MIN_CLIENT_PROTOCOL})
+        if client_protocol > version.PROTOCOL_VERSION:
+            raise HTTPException(426, {"code": "server_outdated", "message": "Сервер старее приложения: обнови сервер на ПК.",
+                                      "protocol": version.PROTOCOL_VERSION, "minClientProtocol": version.MIN_CLIENT_PROTOCOL})
         for e in body.entities:
             if e.table not in store.ALLOWED_TABLES:
                 raise HTTPException(422, f"Неизвестная таблица: {e.table}")
@@ -194,6 +237,10 @@ def make_app(db_path: Path | None = None) -> FastAPI:
             "more": more,
             "accepted": len(accepted),
             "entities": changes,
+            "protocol": version.PROTOCOL_VERSION,
+            "minClientProtocol": version.MIN_CLIENT_PROTOCOL,
+            "schema": store.schema_version(conn),
+            "serverTime": int(time.time() * 1000),
         }
 
     @app.get("/api/devices")

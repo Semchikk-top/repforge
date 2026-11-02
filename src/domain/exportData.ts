@@ -26,8 +26,8 @@ export function workoutsToCsv(workouts: Workout[], exMap: Map<string, Exercise>,
 }
 
 /** Оставить в файле резервной копии только записи из периода (справочники и шаблоны остаются целиком: на них ссылаются тренировки) */
-export function filterBackup<T extends { workouts?: { id: string; date: string }[]; tracks?: { workoutId: string }[]; body?: { date: string }[] }>(data: T, r: Range): T {
+export function filterBackup<T extends { workouts?: { id: string; date: string }[]; tracks?: { workoutId: string }[]; body?: { date: string }[]; checkins?: { date: string }[] }>(data: T, r: Range): T {
   const workouts = (data.workouts ?? []).filter((w) => inRange(w.date, r));
   const ids = new Set(workouts.map((w) => w.id));
-  return { ...data, workouts, tracks: (data.tracks ?? []).filter((t) => ids.has(t.workoutId)), body: (data.body ?? []).filter((b) => inRange(b.date, r)) };
+  return { ...data, workouts, tracks: (data.tracks ?? []).filter((t) => ids.has(t.workoutId)), body: (data.body ?? []).filter((b) => inRange(b.date, r)), checkins: (data.checkins ?? []).filter((c) => inRange(c.date, r)) };
 }

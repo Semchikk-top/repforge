@@ -96,6 +96,32 @@ def _extra_hosts() -> set[str]:
     return hosts - {""}
 
 
+# Нативная оболочка (Capacitor) открывает приложение с собственного адреса: https://localhost на Android и
+# capacitor://localhost на iOS. Для сервера это «чужой сайт», поэтому такие адреса разрешены явно (и только они).
+# Это не ослабляет защиту: Origin ставит браузерный движок, страница подделать его не может, а программам вне
+# браузера проверка Origin никогда не мешала; доступ к данным по-прежнему требует токена устройства или подтверждённого сопряжения.
+# WORKOUT_NATIVE_ORIGINS=через,запятую — свой список; пустая строка отключает поддержку нативных клиентов.
+NATIVE_ORIGINS_DEFAULT = "https://localhost,capacitor://localhost"
+CORS_ALLOW_METHODS = b"GET, POST, PUT, PATCH, DELETE, OPTIONS"
+CORS_ALLOW_HEADERS = b"authorization, content-type"
+
+
+def native_origins() -> set[str]:
+    raw = os.environ.get("WORKOUT_NATIVE_ORIGINS", NATIVE_ORIGINS_DEFAULT)
+    return {o.strip().lower().rstrip("/") for o in raw.split(",") if o.strip()}
+
+
+def cors_headers(origin: str) -> list[tuple[bytes, bytes]]:
+    """CORS без cookie: авторизация идёт заголовком Authorization, поэтому Allow-Credentials не нужен."""
+    return [
+        (b"access-control-allow-origin", origin.encode("latin-1")),
+        (b"access-control-allow-methods", CORS_ALLOW_METHODS),
+        (b"access-control-allow-headers", CORS_ALLOW_HEADERS),
+        (b"access-control-max-age", b"600"),
+        (b"vary", b"Origin"),
+    ]
+
+
 def host_allowed(value: str) -> bool:
     """Разрешены: localhost, адреса частных сетей (LAN, Tailscale 100.64/10), *.ts.net, *.local и явно заданные.
     Публичные имена и адреса отклоняются: так чужой сайт не сможет достучаться до сервера через DNS rebinding."""
@@ -121,10 +147,10 @@ class SecurityMiddleware:
     def __init__(self, app):
         self.app = app
 
-    async def _reject(self, send, status: int, message: str):
+    async def _reject(self, send, status: int, message: str, extra=()):
         body = json.dumps({"detail": message}, ensure_ascii=False).encode()
         headers = [(b"content-type", b"application/json; charset=utf-8"), (b"content-length", str(len(body)).encode()), (b"cache-control", b"no-store")]
-        headers += list(HEADERS.items())
+        headers += list(HEADERS.items()) + list(extra)
         await send({"type": "http.response.start", "status": status, "headers": headers})
         await send({"type": "http.response.body", "body": body})
 
@@ -138,6 +164,15 @@ class SecurityMiddleware:
         if not host_allowed(host):
             return await self._reject(send, 421, "Неизвестный адрес сервера. Добавь его в WORKOUT_ALLOWED_HOSTS.")
 
+        origin_h = h.get("origin", "")
+        native = bool(origin_h) and origin_h.lower().rstrip("/") in native_origins()
+        cors = cors_headers(origin_h) if native and path.startswith("/api/") else []
+
+        if native and cors and method == "OPTIONS" and "access-control-request-method" in h:
+            # предзапрос CORS: отвечаем сразу, до приложения
+            await send({"type": "http.response.start", "status": 204, "headers": cors + [(b"content-length", b"0"), (b"cache-control", b"no-store")] + list(HEADERS.items())})
+            return await send({"type": "http.response.body", "body": b""})
+
         if method in BODY_METHODS and path.startswith("/api/"):
             # CSRF: запросы с другого сайта не принимаем, даже если браузер разрешил их отправить
             origin, site = h.get("origin"), h.get("sec-fetch-site")
@@ -146,19 +181,19 @@ class SecurityMiddleware:
             # сверяем и с X-Forwarded-Host, а метка браузера Sec-Fetch-Site (её страница подделать не может) считается надёжной.
             # Чужой сайт не может ни поставить X-Forwarded-Host (нужна проверка CORS), ни подделать Sec-Fetch-Site.
             same_origin = site == "same-origin" or (bool(origin) and (origin_matches(origin, host) or (bool(fwd) and origin_matches(origin, fwd))))
-            if origin == "null" or site == "cross-site" or (origin and not same_origin):
+            if not native and (origin == "null" or site == "cross-site" or (origin and not same_origin)):
                 return await self._reject(send, 403, "Запрос с чужого сайта отклонён")
             length = h.get("content-length")
             if length is None and "transfer-encoding" in h:
-                return await self._reject(send, 411, "Нужен Content-Length")
+                return await self._reject(send, 411, "Нужен Content-Length", cors)
             limit = MAX_BODY if path == "/api/sync" else MAX_BODY_SMALL
             try:
                 if length is not None and int(length) > limit:
-                    return await self._reject(send, 413, "Запрос слишком большой")
+                    return await self._reject(send, 413, "Запрос слишком большой", cors)
             except ValueError:
-                return await self._reject(send, 400, "Некорректный Content-Length")
+                return await self._reject(send, 400, "Некорректный Content-Length", cors)
             if (length not in (None, "0")) and "application/json" not in h.get("content-type", "").lower():
-                return await self._reject(send, 415, "Нужен Content-Type: application/json")
+                return await self._reject(send, 415, "Нужен Content-Type: application/json", cors)
 
         secure = scope.get("scheme") == "https" or h.get("x-forwarded-proto", "").split(",")[0].strip() == "https"
 
@@ -171,6 +206,7 @@ class SecurityMiddleware:
                         headers.append((k, v))
                 if path.startswith("/api/") and b"cache-control" not in names:
                     headers.append((b"cache-control", b"no-store"))
+                headers.extend(cors)
                 if secure:
                     headers.append((b"strict-transport-security", b"max-age=31536000"))
                 msg = {**msg, "headers": headers}

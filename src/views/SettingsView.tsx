@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import { platform } from '../platform';
+import { BackupSection } from './BackupSection';
+import { openBackupText } from '../db/autoBackup';
+import type { ExactAlarmState } from '../platform/types';
 import { exportAll, importAll } from '../db/repo';
 import { useSettings } from '../state/settings';
 import { Toggle } from '../ui/Toggle';
@@ -6,6 +10,7 @@ import { useToast } from '../ui/Toast';
 import { toDateStr } from '../lib';
 import { SyncSection } from './SyncSection';
 import { ExportSheet } from './ExportSheet';
+import { ImportWorkoutsSheet } from './ImportWorkoutsSheet';
 import { unlockManual } from '../game/store';
 import { go } from '../state/router';
 import { IconBack } from '../ui/Icons';
@@ -13,6 +18,10 @@ import { ConflictsCard } from './ConflictsCard';
 import { BACKEND_LABEL, getAssistantStatus, resolveBackend, type AssistantStatus, type Backend } from '../assistant/api';
 import { AssistantConnect } from './AssistantConnect';
 import { useSyncStatus } from '../sync/useSync';
+import { useGame } from '../game/hooks';
+import { diagnosticsUnlocked } from '../sync/diagnostics';
+import { openExternal } from '../ui/openExternal';
+import { LEGAL } from '../legal/config';
 
 function backendStatus(b: Backend, paired: boolean, st: AssistantStatus | null): string {
   if (!paired) return 'Ассистент работает через сервер на ПК: сначала подключи устройство ниже.';
@@ -58,9 +67,11 @@ export function SettingsView() {
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
   const sync = useSyncStatus();
+  const devTools = diagnosticsUnlocked(useGame().unlocked);
   const [astatus, setAstatus] = useState<AssistantStatus | null>(null);
   const [connect, setConnect] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [importingCsv, setImportingCsv] = useState(false);
   const refreshStatus = () => { if (sync.configured && !sync.unauthorized) void getAssistantStatus().then(setAstatus); };
   useEffect(refreshStatus, [sync.configured, sync.unauthorized]); // eslint-disable-line react-hooks/exhaustive-deps
   const backend = resolveBackend(settings);
@@ -76,7 +87,9 @@ export function SettingsView() {
 
   const doImport = async (file: File) => {
     try {
-      const r = await importAll(await file.text());
+      // зашифрованную копию читаем по паролю (или ключом приложения, если она сделана здесь же)
+      const text = await openBackupText(await file.text(), () => prompt('Пароль от этой копии'));
+      const r = await importAll(text);
       toast(`Импортировано: тренировок ${r.workouts}, упражнений ${r.exercises}, шаблонов ${r.templates}`);
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Не удалось прочитать файл');
@@ -84,10 +97,12 @@ export function SettingsView() {
   };
 
   const askNotifications = async () => {
-    if (!('Notification' in window)) { toast('Уведомления не поддерживаются'); return; }
-    const p = await Notification.requestPermission();
-    toast(p === 'granted' ? 'Уведомления включены' : 'Уведомления запрещены в браузере');
+    if (platform.notifications.permission() === 'unsupported') { toast('Уведомления не поддерживаются'); return; }
+    const p = await platform.notifications.request();
+    toast(p === 'granted' ? 'Уведомления включены' : platform.info.native ? 'Уведомления запрещены в настройках телефона' : 'Уведомления запрещены в браузере');
   };
+
+  const openLink = async (url: string) => { if (!(await openExternal(url))) toast('Не удалось открыть ссылку'); };
 
   const taps = useRef({ n: 0, t: 0 });
   const onVersionTap = () => {
@@ -99,7 +114,17 @@ export function SettingsView() {
     }
   };
 
-  const notifState = 'Notification' in window ? Notification.permission : 'denied';
+  // Android 12+: без точных будильников система вправе задержать сигнал таймера в фоне на минуты
+  const [exact, setExact] = useState<ExactAlarmState>('unsupported');
+  useEffect(() => {
+    const check = () => void platform.notifications.exactAlarm().then(setExact);
+    check();
+    return platform.lifecycle.onResume(check);
+  }, []);
+  // Хранилище страницы: если система не обещает беречь данные при нехватке места, честно об этом говорим
+  const [persisted, setPersisted] = useState<boolean | null>(null);
+  useEffect(() => { void navigator.storage?.persisted?.().then(setPersisted).catch(() => setPersisted(null)); }, []);
+  const notifState = platform.notifications.permission() === 'unsupported' ? 'denied' : platform.notifications.permission();
 
   return (
     <div>
@@ -183,9 +208,18 @@ export function SettingsView() {
           </div>
           <button className="btn small" disabled={notifState !== 'default'} onClick={askNotifications}>Разрешить</button>
         </div>
+        {exact === 'denied' && (
+          <div className="row">
+            <div className="grow">
+              <div>Точные уведомления</div>
+              <div className="meta">Выключены: сигнал об окончании отдыха в фоне может опаздывать на минуты. Откроются настройки Android.</div>
+            </div>
+            <button className="btn small" onClick={() => void platform.notifications.requestExactAlarm().then(setExact)}>Разрешить</button>
+          </div>
+        )}
         <div className="row">
           <div className="grow">Напоминать о тренировке по плану
-            <div className="meta">В выбранное время, если на сегодня запланирована тренировка. Работает, пока приложение открыто или свёрнуто.</div>
+            <div className="meta">В выбранное время, если на этот день запланирована тренировка. {platform.notifications.background ? 'Приходит и при закрытом приложении.' : 'Работает, пока приложение открыто или свёрнуто.'}</div>
           </div>
           <Toggle label="Напоминание" checked={settings.reminderEnabled} onChange={(v) => update({ reminderEnabled: v })} />
         </div>
@@ -194,6 +228,37 @@ export function SettingsView() {
             <label htmlFor="rem-time">Время напоминания</label>
             <input id="rem-time" className="input" type="time" value={settings.reminderTime} onChange={(e) => { if (/^\d{2}:\d{2}$/.test(e.target.value)) update({ reminderTime: e.target.value }); }} />
             {notifState !== 'granted' && <span className="sub">Без разрешения на уведомления напоминание появится только внутри приложения.</span>}
+          </div>
+        )}
+
+        <div className="row" style={{ marginTop: 8 }}>
+          <div className="grow">Утренний чек-ин самочувствия
+            <div className="meta">Обычное уведомление. {platform.notifications.background ? 'Если чек-ин уже заполнен, повторно не приходит.' : 'Работает только в приложении для телефона.'}</div>
+          </div>
+          <Toggle label="Утренний чек-ин" checked={settings.checkinMorningEnabled} onChange={(v) => update({ checkinMorningEnabled: v })} />
+        </div>
+        {settings.checkinMorningEnabled && (
+          <div className="field" style={{ marginTop: 8 }}>
+            <label htmlFor="ci-morning-time">Время утреннего чек-ина</label>
+            <input id="ci-morning-time" className="input" type="time" value={settings.checkinMorningTime} onChange={(e) => { if (/^\d{2}:\d{2}$/.test(e.target.value)) update({ checkinMorningTime: e.target.value }); }} />
+          </div>
+        )}
+        <div className="row">
+          <div className="grow">Недельный разбор
+            <div className="meta">Раз в неделю карточка на календаре: что выросло, где застой, что поменять. Считается на этом устройстве, данные никуда не отправляются.</div>
+          </div>
+          <Toggle label="Недельный разбор" checked={settings.weeklyReviewEnabled} onChange={(v) => update({ weeklyReviewEnabled: v })} />
+        </div>
+        <div className="row">
+          <div className="grow">Вечерний чек-ин самочувствия
+            <div className="meta">Итог дня и сравнение с утром.</div>
+          </div>
+          <Toggle label="Вечерний чек-ин" checked={settings.checkinEveningEnabled} onChange={(v) => update({ checkinEveningEnabled: v })} />
+        </div>
+        {settings.checkinEveningEnabled && (
+          <div className="field" style={{ marginTop: 8 }}>
+            <label htmlFor="ci-evening-time">Время вечернего чек-ина</label>
+            <input id="ci-evening-time" className="input" type="time" value={settings.checkinEveningTime} onChange={(e) => { if (/^\d{2}:\d{2}$/.test(e.target.value)) update({ checkinEveningTime: e.target.value }); }} />
           </div>
         )}
       </div>
@@ -205,7 +270,12 @@ export function SettingsView() {
           <button className="btn" style={{ flex: 1 }} onClick={() => fileRef.current?.click()}>Импорт из файла</button>
         </div>
         <button className="btn block" style={{ marginTop: 8 }} onClick={() => setExporting(true)}>Экспорт за период…</button>
+        <button className="btn block" style={{ marginTop: 8 }} onClick={() => setImportingCsv(true)}>Импорт из Hevy или Strong…</button>
+        <button className="btn block" style={{ marginTop: 8 }} onClick={() => go('start')}>Подобрать стартовую программу</button>
         {exporting && <ExportSheet onClose={() => setExporting(false)} />}
+        {importingCsv && <ImportWorkoutsSheet onClose={() => setImportingCsv(false)} />}
+        <BackupSection />
+        {persisted === false && <p className="sub" style={{ marginTop: 8 }}>Система не гарантирует сохранность данных приложения при нехватке места на телефоне. Делай экспорт или подключи синхронизацию с ПК.</p>}
         <input ref={fileRef} type="file" accept="application/json,.json" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) void doImport(f); e.target.value = ''; }} />
       </div>
 
@@ -213,7 +283,20 @@ export function SettingsView() {
 
       <SyncSection />
 
-      <p className="sub" style={{ textAlign: 'center', marginTop: 24 }} onClick={onVersionTap}>Версия {__APP_VERSION__} · альфа</p>
+      <div className="section">
+        <h2>О приложении</h2>
+        <button className="btn block" onClick={() => void openLink(LEGAL.githubUrl)}>Десктопная версия и локальный сервер</button>
+        <button className="btn block" style={{ marginTop: 8 }} onClick={() => void openLink(LEGAL.supportUrl)}>Поддержать разработчика</button>
+        <button className="btn block" style={{ marginTop: 8 }} onClick={() => go('privacy')}>Политика конфиденциальности</button>
+        <p className="sub" style={{ marginTop: 8 }}>
+          Основные функции работают без сервера и без регистрации. Сервер на ПК нужен только для синхронизации и ассистента.
+          Поддержка добровольная: приложение полностью работает и без неё.
+        </p>
+      </div>
+
+      {devTools && <button className="btn block" style={{ marginTop: 12 }} onClick={() => go('diagnostics')}>Диагностика</button>}
+
+      <p className="sub" style={{ textAlign: 'center', marginTop: 24 }} onClick={onVersionTap}>Версия {__APP_VERSION__.replace(/-.*$/, '')}</p>
     </div>
   );
 }

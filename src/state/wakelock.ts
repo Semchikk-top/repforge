@@ -1,27 +1,26 @@
 import { useEffect } from 'react';
+import { platform } from '../platform';
 
 // Не даём экрану гаснуть, пока открыта активная тренировка.
 export function useWakeLock(active: boolean) {
   useEffect(() => {
-    if (!active || !('wakeLock' in navigator)) return;
-    let lock: WakeLockSentinel | null = null;
+    if (!active) return;
+    let release: (() => void) | null = null;
     let cancelled = false;
 
     const acquire = async () => {
-      try {
-        const l = await navigator.wakeLock.request('screen');
-        if (cancelled) { void l.release(); return; }
-        lock = l;
-      } catch { /* система может отказать (экономия заряда) — это не критично */ }
+      const r = await platform.wakeLock.acquire();
+      if (cancelled) { r(); return; }
+      release?.(); // браузер сам снимает блокировку в фоне, но нативная оболочка — нет
+      release = r;
     };
-    const onVis = () => { if (document.visibilityState === 'visible') void acquire(); };
 
     void acquire();
-    document.addEventListener('visibilitychange', onVis);
+    const off = platform.lifecycle.onResume(() => void acquire());
     return () => {
       cancelled = true;
-      document.removeEventListener('visibilitychange', onVis);
-      void lock?.release();
+      off();
+      release?.();
     };
   }, [active]);
 }

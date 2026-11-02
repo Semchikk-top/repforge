@@ -15,27 +15,36 @@ import { RestTimerProvider } from './state/timer';
 import { ToastProvider } from './ui/Toast';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { RoomProvider } from './nearby/RoomProvider';
+import { initPlatform, isNative } from './platform';
 
-// Регистрируем после window.load: установка service worker сразу скачивает precache и на первом
-// запуске конкурирует с самим приложением за канал. Офлайн-режим включится на секунду позже.
-registerSW({ immediate: false });
+async function boot() {
+  // В браузере это мгновенный no-op; в Capacitor подгружается нативная реализация платформы.
+  await initPlatform();
 
-// Просим браузер не вычищать данные при нехватке места
-void navigator.storage?.persist?.();
+  // Регистрируем после window.load: установка service worker сразу скачивает precache и на первом
+  // запуске конкурирует с самим приложением за канал. Офлайн-режим включится на секунду позже.
+  // В нативной оболочке service worker не нужен: ресурсы лежат в самом приложении, а SW кэшировал бы старый бандл.
+  if (!isNative()) registerSW({ immediate: false });
 
-applyTheme(storedTheme()); // тема до первой отрисовки: без мигания
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <SettingsProvider>
-      <RestTimerProvider>
-        <ToastProvider>
-          <RoomProvider>
-            <ErrorBoundary>
-              <App />
-            </ErrorBoundary>
-          </RoomProvider>
-        </ToastProvider>
-      </RestTimerProvider>
-    </SettingsProvider>
-  </StrictMode>
-);
+  // Просим браузер не вычищать данные при нехватке места
+  void navigator.storage?.persist?.();
+
+  applyTheme(storedTheme()); // тема до первой отрисовки: без мигания
+  createRoot(document.getElementById('root')!).render(
+    <StrictMode>
+      <SettingsProvider>
+        <RestTimerProvider>
+          <ToastProvider>
+            <RoomProvider>
+              <ErrorBoundary>
+                <App />
+              </ErrorBoundary>
+            </RoomProvider>
+          </ToastProvider>
+        </RestTimerProvider>
+      </SettingsProvider>
+    </StrictMode>
+  );
+}
+
+void boot();

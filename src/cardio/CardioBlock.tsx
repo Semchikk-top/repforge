@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
+import { download } from '../db/exporter';
 import { putTrack, softDelete } from '../db/repo';
 import { lastCardio } from '../domain/analytics';
 import { sportOf, type CardioEntry, type Exercise, type Workout, type WorkoutExercise } from '../domain/types';
@@ -67,11 +68,7 @@ export function CardioBlock({ workout, we, exercise, history, onBegin, onSave }:
     if (!track || track.deletedAt) return;
     const name = `${exercise?.name ?? 'Тренировка'} ${workout.date}`;
     const xml = toGpx(name, workout.startedAt ?? Date.parse(workout.date), track.points, settings.privacyZoneM);
-    const url = URL.createObjectURL(new Blob([xml], { type: 'application/gpx+xml' }));
-    const a = document.createElement('a');
-    a.href = url; a.download = `${workout.date}-${sport}.gpx`;
-    document.body.appendChild(a); a.click(); a.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 4000);
+    download(`${workout.date}-${sport}.gpx`, xml, 'application/gpx+xml');
   };
 
   const remove = async () => {
@@ -84,7 +81,7 @@ export function CardioBlock({ workout, we, exercise, history, onBegin, onSave }:
 
   const finishPending = async () => {
     if (!pending) return;
-    const { entry, track: pts } = toEntry(new Tracker(sport, pending.state));
+    const { entry, track: pts } = toEntry(new Tracker(sport, pending.state), pending.hr);
     if (entry.distanceM < 20) { await clearActive(); setPending(null); toast('Запись была слишком короткой, отброшена'); return; }
     await saveRecording(entry, pts);
   };

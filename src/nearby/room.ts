@@ -1,6 +1,6 @@
 // Менеджер комнаты: один на всё приложение, живёт вне React (StrictMode не создаст второе соединение).
 // Соединения создаются только по действию человека: createRoom() / joinRoom() вызываются из обработчиков кнопок.
-import { APP_VERSION, LIMITS, PROTO_VERSION, RELAY_URL } from './config';
+import { APP_VERSION, getRelayUrl, LIMITS, PROTO_VERSION } from './config';
 import { normalizeCode } from './code';
 import { cleanText, encodeWire, MAX_MESSAGES, MAX_NAME, MAX_TEXT, parseWire, quickText, type QuickId, type Wire } from './messages';
 import { createPeerLink, type PeerFactory, type PeerHandle } from './peer';
@@ -114,7 +114,8 @@ export class RoomManager {
     this.deps = {
       signaling: deps?.signaling ?? connectSignaling,
       peer: deps?.peer ?? createPeerLink,
-      relayUrl: deps?.relayUrl ?? RELAY_URL,
+      // адрес читается в момент подключения: его можно сменить в окне комнаты без перезапуска
+      get relayUrl() { return deps?.relayUrl ?? getRelayUrl(); },
       now: deps?.now ?? (() => Date.now())
     };
   }

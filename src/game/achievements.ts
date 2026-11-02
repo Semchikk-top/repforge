@@ -45,7 +45,7 @@ export function computeStats(all: Workout[], exercises: Exercise[], purchases = 
   const weeks = new Set<string>();
   const kinds = new Set<string>();
   const perDay = new Map<string, number>();
-  for (const w of finished(all)) {
+  for (const w of finished(all).filter((x) => !x.imported)) { // перенесённая история в достижения не входит: за неё уже получено в другом приложении
     let worked = false;
     for (const { exerciseId, set } of doneSets(w)) {
       if (set.reps <= 0) continue;

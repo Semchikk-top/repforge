@@ -78,6 +78,7 @@ export interface Workout extends SyncMeta {
   note?: string;
   programId?: ID;    // тренировка создана программой
   programSlot?: string; // «программа:неделя:день»: чтобы не назначать одно и то же дважды
+  imported?: boolean; // перенесена из другого приложения: в аналитике и рекордах есть, опыта, монет и достижений не даёт
 }
 
 // Маршрут хранится отдельной записью: он тяжёлый и нужен только на экране кардио
@@ -91,6 +92,22 @@ export interface BodyEntry extends SyncMeta {
   date: string;
   weightKg?: number;
   waistCm?: number;
+}
+
+// Чек-ин самочувствия: один тип записи и два слота. Утро и вечер сравнимы, потому что ядро метрик общее.
+export type CheckInSlot = 'morning' | 'evening';
+export type Rating = 1 | 2 | 3 | 4 | 5;
+export interface CheckIn extends SyncMeta {
+  date: string;                 // YYYY-MM-DD
+  slot: CheckInSlot;            // один слот на дату: id детерминирован (см. checkInId)
+  energy: Rating;
+  mood: Rating;
+  soreness: Rating;             // болезненность мышц: 5 — сильнее всего
+  stress: Rating;
+  sleepHours?: number;          // только утро
+  sleepQuality?: Rating;        // только утро
+  sleepiness?: Rating;          // только вечер
+  note?: string;
 }
 
 export interface TemplateExercise {
@@ -126,6 +143,12 @@ export interface Settings {
   theme: 'auto' | 'dark' | 'light';
   reminderEnabled: boolean;   // напоминание о тренировке по плану
   reminderTime: string;       // «HH:MM»
+  checkinMorningEnabled: boolean; // напоминание об утреннем чек-ине самочувствия
+  checkinMorningTime: string;     // «HH:MM»
+  checkinEveningEnabled: boolean; // напоминание о вечернем чек-ине
+  checkinEveningTime: string;     // «HH:MM»
+  weeklyReviewEnabled: boolean;   // карточка недельного разбора на календаре (считается на устройстве)
+  autoBackup: boolean;        // автокопия раз в сутки внутри приложения (только нативная оболочка)
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -144,7 +167,13 @@ export const DEFAULT_SETTINGS: Settings = {
   maxHr: 0,
   theme: 'dark',
   reminderEnabled: false,
-  reminderTime: '18:00'
+  reminderTime: '18:00',
+  checkinMorningEnabled: false,
+  checkinMorningTime: '08:00',
+  checkinEveningEnabled: false,
+  checkinEveningTime: '21:30',
+  weeklyReviewEnabled: false,
+  autoBackup: true
 };
 
 export const MUSCLE_LABELS: Record<MuscleGroup, string> = {
@@ -164,7 +193,7 @@ export const MUSCLE_LABELS: Record<MuscleGroup, string> = {
 // Запись журнала изменений (outbox) — основа будущей синхронизации.
 export interface ChangeRecord {
   seq?: number;
-  table: 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game';
+  table: 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game' | 'checkins';
   entityId: ID;
   op: 'put' | 'delete';
   ts: number;
@@ -196,7 +225,7 @@ export interface Program extends SyncMeta {
 // Только на этом устройстве (не синхронизируется): снимок версии, которую перезаписали с другого устройства
 export interface ConflictRecord {
   id?: number;
-  table: 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game';
+  table: 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game' | 'checkins';
   entityId: ID;
   label: string;
   local: Record<string, unknown>;

@@ -665,3 +665,26 @@ button.av { cursor: pointer; }
 @media (prefers-reduced-motion: reduce) {
   .av, .av *, .profile-hero.anim, .swatch.anim, .av-spinner { animation: none !important; }
 }
+
+/* Живой пульс на экране записи */
+.rec-hr { text-align: center; padding: 6px 12px 2px; min-height: 34px; }
+.rec-hr-num { font-family: var(--font-display, inherit); font-size: 28px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.rec-hr-zone { font-size: 13px; margin-left: 6px; padding: 2px 8px; border-radius: 999px; background: var(--surface-2, rgba(128,128,128,.16)); }
+.rec-hr-zone.z4, .rec-hr-zone.z5 { font-weight: 600; }
+
+/* «Что делать сегодня» (0.12) */
+.today-card { margin: 4px 0 16px; padding: 16px; border-radius: 16px; background: var(--surface); border: 1px solid var(--line); border-left: 4px solid var(--accent); }
+.today-card.k-done, .today-card.k-rest { border-left-color: var(--ok); }
+.today-card.k-missed { border-left-color: var(--danger); }
+.today-kicker { color: var(--muted); font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; }
+.today-head { font-family: var(--font-display); font-size: 28px; line-height: 1.1; margin: 2px 0 6px; }
+.today-detail { color: var(--muted); }
+.today-steps { list-style: none; margin: 12px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.today-steps li { display: flex; align-items: flex-start; gap: 10px; }
+.today-steps .tick { flex: none; width: 20px; height: 20px; margin-top: 1px; border-radius: 50%; border: 2px solid var(--line); }
+.today-steps li.done { color: var(--muted); }
+.today-steps li.done .tick { background: var(--ok); border-color: var(--ok); }
+.today-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.today-actions .btn.primary { flex: 1 1 160px; }
+.today-skip { margin-top: 8px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

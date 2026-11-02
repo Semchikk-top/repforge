@@ -94,6 +94,78 @@ export function muscleDistribution(all: Workout[], exMap: Map<string, Exercise>,
   return [...acc.values()].sort((a, b) => b.sets - a.sets);
 }
 
+// ---------- роза нагрузки ----------
+
+/** Десять силовых групп в постоянном порядке: от него зависит положение лепестков розы. Кардио в силовую розу не входит. */
+export const STRENGTH_MUSCLES: MuscleGroup[] = ['chest', 'back', 'shoulders', 'biceps', 'triceps', 'forearms', 'core', 'glutes', 'legs', 'calves'];
+export type LoadMetric = 'sets' | 'volume';
+export const LOAD_PERIODS = [7, 30, 90] as const;
+export const LOAD_BASELINE_DAYS = 56; // восемь недель: «собственное среднее»
+
+export interface MuscleLoad {
+  muscle: MuscleGroup;
+  sets: number;
+  volume: number;
+  /** Доля от собственного объёма за период, целые проценты; сумма по всем группам ровно 100 (или 0, если данных нет). */
+  share: number;
+  /** Доля за последние восемь недель: с чем сравнивать. */
+  baselineShare: number;
+  /** share − baselineShare, в процентных пунктах. */
+  delta: number;
+}
+
+/** Целые проценты с суммой ровно 100: метод наибольших остатков. При нулевой сумме все доли 0. */
+export function percentShares(values: number[]): number[] {
+  const total = values.reduce((a, v) => a + v, 0);
+  if (!(total > 0)) return values.map(() => 0);
+  const raw = values.map((v) => (v / total) * 100);
+  const base = raw.map(Math.floor);
+  let left = 100 - base.reduce((a, v) => a + v, 0);
+  const order = raw.map((r, i) => ({ i, rem: r - base[i] })).sort((a, b) => b.rem - a.rem || a.i - b.i);
+  for (let k = 0; left > 0; k++, left--) base[order[k % order.length].i]++;
+  return base;
+}
+
+function tally(all: Workout[], exMap: Map<string, Exercise>, days: number, now: Date) {
+  const from = toDateStr(addDays(now, -(days - 1)));
+  const to = toDateStr(now);
+  const acc = new Map<MuscleGroup, { sets: number; volume: number }>(STRENGTH_MUSCLES.map((m) => [m, { sets: 0, volume: 0 }]));
+  for (const w of finished(all).filter((x) => x.date >= from && x.date <= to)) {
+    for (const { exerciseId, set } of doneSets(w)) { // разминка и невыполненные подходы уже отброшены
+      const m = exMap.get(exerciseId)?.muscle;
+      const cur = m ? acc.get(m) : undefined;
+      if (!cur) continue; // кардио и неизвестные группы
+      cur.sets += 1;
+      cur.volume += set.weight * set.reps;
+    }
+  }
+  return acc;
+}
+
+/**
+ * Нагрузка по группам мышц за последние `days` дней (включая сегодня). Все десять групп присутствуют всегда, пустые с нулями:
+ * иначе роза «схлопывалась» бы. Основная мышца упражнения, вторичные не учитываются.
+ * Для каждой группы считается отклонение от собственного среднего за восемь недель, без универсальных «идеальных» процентов.
+ */
+export function muscleLoad(all: Workout[], exMap: Map<string, Exercise>, opts: { days?: number; metric?: LoadMetric; now?: Date } = {}): MuscleLoad[] {
+  const days = opts.days ?? 30;
+  const metric = opts.metric ?? 'sets';
+  const now = opts.now ?? new Date();
+  const cur = tally(all, exMap, days, now);
+  const base = tally(all, exMap, LOAD_BASELINE_DAYS, now);
+  const pick = (m: MuscleGroup, t: Map<MuscleGroup, { sets: number; volume: number }>) => t.get(m)![metric];
+  const shares = percentShares(STRENGTH_MUSCLES.map((m) => pick(m, cur)));
+  const baseShares = percentShares(STRENGTH_MUSCLES.map((m) => pick(m, base)));
+  return STRENGTH_MUSCLES.map((muscle, i) => ({
+    muscle,
+    sets: cur.get(muscle)!.sets,
+    volume: cur.get(muscle)!.volume,
+    share: shares[i],
+    baselineShare: baseShares[i],
+    delta: shares[i] - baseShares[i]
+  }));
+}
+
 export interface SeriesPoint { date: string; value: number }
 
 export function e1rmSeries(all: Workout[], exerciseId: string): SeriesPoint[] {

@@ -64,6 +64,7 @@ with sync_playwright() as p:
     pg.reload()
     pg.wait_for_url(re.compile(r"#/workout/\w+"), timeout=8000)
     check("быстрый старт не плодит тренировки", pg.url.split("#")[1] == first, pg.url)
+    pg.wait_for_selector("text=Завершить тренировку", timeout=5000)  # экран рисуется после чтения из базы: ждём, а не угадываем
     check("тренировка уже идёт", pg.locator("text=Завершить тренировку").count() == 1)
 
     # --- суперсет ---

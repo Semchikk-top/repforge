@@ -183,3 +183,72 @@ describe('синхронизация', () => {
     expect(((await db.game.get('state')) as { equipped: Record<string, string> }).equipped.avatar).toBe('av-letter');
   });
 });
+
+describe('перенесённая история (импорт) наград не даёт', () => {
+  const imported = (date: string, sets = [set(100, 10), set(100, 10), set(100, 10)]) => wk(date, 'seed-001', sets, { imported: true });
+
+  it('за импортированную тренировку нет ни опыта, ни монет, а такая же обычная награждается', () => {
+    const sets = [set(100, 10), set(100, 10)];
+    expect(workoutAward(imported('2026-10-01', sets), exMap)).toEqual({ xp: 0, coins: 0 });
+    expect(workoutAward(wk('2026-10-01', 'seed-001', sets), exMap).xp).toBeGreaterThan(0);
+  });
+
+  it('в достижения импортированные тренировки не входят: ни число тренировок, ни тоннаж, ни рекорд жима', () => {
+    const many = Array.from({ length: 12 }, (_, i) => imported(`2026-09-${String(i + 1).padStart(2, '0')}`, [set(140, 1)]));
+    const s = computeStats(many, EXS);
+    expect(s.workouts).toBe(0);
+    expect(s.volumeKg).toBe(0);
+    expect(s.bench).toBe(0);
+    expect(earnedNow(s)).toEqual([]);
+    const mixed = computeStats([...many, wk('2026-10-01', 'seed-001', [set(60, 5)])], EXS);
+    expect(mixed.workouts).toBe(1);
+    expect(mixed.bench).toBe(60);
+  });
+
+  it('сверка журнала после импорта большой истории ничего не начисляет и не открывает достижений', async () => {
+    const many = Array.from({ length: 120 }, (_, i) => ({ ...imported(`2026-0${1 + (i % 9)}-${String(1 + (i % 27)).padStart(2, '0')}`), id: `imp-${i}` }));
+    await db.workouts.bulkPut(many);
+    const r = await reconcileGame();
+    expect(r.xpGained).toBe(0);
+    expect(r.coinsGained).toBe(0);
+    expect(r.newAchievements).toEqual([]);
+    expect(await db.game.count()).toBe(0);
+  });
+
+  it('обычная тренировка рядом с импортом награждается как обычно, а импорт остаётся без награды', async () => {
+    await db.workouts.bulkPut([{ ...imported('2026-09-01'), id: 'imp-1' }, { ...wk('2026-10-01', 'seed-001', [set(100, 10), set(100, 10)]), id: 'own-1' }]);
+    const r = await reconcileGame();
+    expect(r.xpGained).toBeGreaterThan(0);
+    const rows = await db.game.toArray();
+    expect(rows.some((g) => g.id === 'wk:own-1')).toBe(true);
+    expect(rows.some((g) => g.id === 'wk:imp-1')).toBe(false);
+  });
+});
+
+describe('время получения достижения', () => {
+  const [a1, a2] = ACHIEVEMENTS;
+  const row = (achId: string, at: unknown, extra: Record<string, unknown> = {}) =>
+    ({ id: `ach:${achId}`, kind: 'achievement', achId, xp: 10, coins: 10, at, createdAt: 5, updatedAt: 9, deviceId: 'd', ...extra }) as unknown as GameRow;
+
+  it('время в миллисекундах не обрезается (раньше любая дата превращалась в 1 января 1970)', () => {
+    const at = Date.UTC(2026, 9, 30, 12, 0, 0);
+    const t = totalsOf([row(a1.id, at)]);
+    expect(t.unlocked.get(a1.id)).toBe(at);
+    expect(new Date(t.unlocked.get(a1.id)!).getUTCFullYear()).toBe(2026);
+  });
+  it('порядок «недавно получено» определяется временем', () => {
+    const t = totalsOf([row(a1.id, 1_790_000_000_000), row(a2.id, 1_791_000_000_000)]);
+    const order = [...t.unlocked.entries()].sort((x, y) => y[1] - x[1]).map(([id]) => id);
+    expect(order).toEqual([a2.id, a1.id]);
+  });
+  it('без корректного времени берётся createdAt, затем updatedAt', () => {
+    expect(totalsOf([row(a1.id, 'вчера')]).unlocked.get(a1.id)).toBe(5);
+    expect(totalsOf([row(a1.id, NaN, { createdAt: undefined })]).unlocked.get(a1.id)).toBe(9);
+    expect(totalsOf([row(a1.id, -4)]).unlocked.get(a1.id)).toBe(5);
+    expect(totalsOf([row(a1.id, 1e300)]).unlocked.get(a1.id)).toBe(5);
+  });
+  it('если достижение записалось на двух устройствах, помнится самое раннее', () => {
+    const t = totalsOf([row(a1.id, 2_000_000_000_000), { ...row(a1.id, 1_900_000_000_000), id: 'ach:' + a1.id + ':copy' } as GameRow]);
+    expect(t.unlocked.get(a1.id)).toBe(1_900_000_000_000);
+  });
+});

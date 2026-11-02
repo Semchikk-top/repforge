@@ -22,6 +22,7 @@ export function effectiveSetVolume(weight: number, reps: number): number {
 }
 
 export function workoutAward(w: Workout, exercises: Map<string, Exercise>): Award {
+  if (w.imported) return { xp: 0, coins: 0 }; // перенесённая история не должна давать награды: иначе импорт одного файла начислял бы их повторно
   let vol = 0;
   let cardioXp = 0;
   let worked = false;

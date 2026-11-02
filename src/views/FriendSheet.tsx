@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { RELAY_URL } from '../nearby/config';
+import { relayConfigured } from '../nearby/config';
+import { platform } from '../platform';
 import { formatCodeInput, normalizeCode } from '../nearby/code';
 import { unlockAudio } from '../nearby/alert';
 import { formatSas } from '../nearby/sdp';
@@ -13,6 +14,7 @@ import { buildMySnapshots, getFriend, getProfile, saveSnapshots } from '../socia
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 import { formatClock } from '../lib';
+import { download as exportDownload } from '../db/exporter';
 
 /** Добавление друга и обновление рейтинга: по коду (живое соединение) или файлом. Дневник друзьям не передаётся. */
 export function FriendSheet({ onClose }: { onClose: () => void }) {
@@ -37,12 +39,12 @@ export function FriendSheet({ onClose }: { onClose: () => void }) {
 function Start() {
   const [code, setCode] = useState('');
   const toast = useToast();
-  const live = RELAY_URL !== '';
+  const live = relayConfigured();
   return (
     <>
       <p className="sub room-lead">Друг видит только итоги за период (нагрузку по упражнениям и кардио), подписанные вашим ключом. Тренировки, заметки, замеры тела, маршруты и ассистент не передаются.</p>
       <h3 className="room-h">По коду</h3>
-      {!live && <p className="room-note">В этой сборке не задан адрес релея: по коду добавить нельзя. Используйте обмен файлом ниже.</p>}
+      {!live && <p className="room-note">{platform.info.native ? 'Адрес релея не задан: укажи его в окне «Рядом» (комната по коду). Пока можно использовать обмен файлом ниже.' : 'В этой сборке не задан адрес релея: по коду добавить нельзя. Используйте обмен файлом ниже.'}</p>}
       <button className="btn primary block" disabled={!live} onClick={() => { unlockAudio(); void friendLink.invite(); }}>Создать приглашение</button>
       <div className="field" style={{ marginTop: 12 }}>
         <label htmlFor="fr-code">Код от друга</label>
@@ -117,12 +119,7 @@ function Closed({ s }: { s: FriendLinkState }) {
   );
 }
 
-function download(name: string, text: string) {
-  const url = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
-  const a = document.createElement('a');
-  a.href = url; a.download = name; a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
+const download = (name: string, text: string) => exportDownload(name, text, 'application/json');
 
 /** Обмен без сети: подписанный файл со снимками. Показывается и без релея. */
 function FileExchange() {

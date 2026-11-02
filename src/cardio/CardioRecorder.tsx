@@ -1,36 +1,39 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { db } from '../db/db';
+import { platform } from '../platform';
+import type { GeoWatchHandle } from '../platform/types';
 import type { CardioEntry, Sport } from '../domain/types';
 import { useSettings } from '../state/settings';
 import { useWakeLock } from '../state/wakelock';
 import { useToast } from '../ui/Toast';
 import { RouteMap } from './RouteMap';
+import { zoneFor } from './hr';
+import { addHr, newHrAcc, summarizeHr, type HrAcc } from './hrAcc';
+import { startHrSession, type HrSession, type HrState } from './hrSession';
 import {
   Tracker, avgPace, bestEfforts, encodeTrack, formatHMS, formatKm, formatPace, formatSpeedKmh, voiceText,
   type Fix, type TrackPoint, type TrackerState
 } from './geo';
 
-export interface ActiveRecording { workoutId: string; weId: string; sport: Sport; savedAt: number; state: TrackerState }
+export interface ActiveRecording { workoutId: string; weId: string; sport: Sport; savedAt: number; state: TrackerState; hr?: HrAcc }
+const HR_DEVICE_KEY = 'hr.device';
 const ACTIVE_KEY = 'cardio.active';
 
 export const loadActive = async (): Promise<ActiveRecording | null> => ((await db.kv.get(ACTIVE_KEY))?.value as ActiveRecording | undefined) ?? null;
 export const clearActive = () => db.kv.delete(ACTIVE_KEY);
 
-export function gpsSupport(): string | null {
-  if (!('geolocation' in navigator)) return 'Этот браузер не умеет определять местоположение.';
-  if (!window.isSecureContext) return 'GPS работает только по защищённому адресу (https://). Открой приложение через Tailscale или на самом ПК. Результат можно ввести вручную.';
-  return null;
-}
+export const gpsSupport = (): string | null => platform.geo.unsupportedReason();
 
 type Status = 'searching' | 'recording' | 'paused';
 
-export function toEntry(tracker: Tracker): { entry: Omit<CardioEntry, 'source' | 'trackId'>; track: TrackPoint[] } {
+export function toEntry(tracker: Tracker, hr?: HrAcc): { entry: Omit<CardioEntry, 'source' | 'trackId'>; track: TrackPoint[] } {
   const st = tracker.stats();
   const track = encodeTrack(tracker.state.points);
   return {
     entry: {
       distanceM: Math.round(st.distanceM), durationSec: Math.round(st.movingSec), elevGainM: Math.round(st.elevGainM),
-      splits: st.splits.map((x) => Math.round(x)), best: bestEfforts(tracker.state.points)
+      splits: st.splits.map((x) => Math.round(x)), best: bestEfforts(tracker.state.points),
+      ...(hr ? summarizeHr(hr) ?? {} : {}) // пульс с датчика, если он был и отсчётов достаточно
     },
     track
   };
@@ -46,7 +49,16 @@ export function CardioRecorder({ workoutId, weId, sport, title, resume, onFinish
   const toast = useToast();
   const { settings } = useSettings();
   const tracker = useRef(new Tracker(sport, resume?.state));
-  const watchId = useRef<number | null>(null);
+  const watchId = useRef<GeoWatchHandle | null>(null);
+  const lastPersistAt = useRef(0);
+  const hrAcc = useRef<HrAcc>(resume?.hr ?? newHrAcc());
+  const hrSession = useRef<HrSession | null>(null);
+  const [hrBpm, setHrBpm] = useState<number | null>(null);
+  const [hrState, setHrState] = useState<HrState | 'off'>('off');
+  const [hrName, setHrName] = useState<string | null>(null);
+  const [hrError, setHrError] = useState<string | null>(null);
+  const maxHrRef = useRef(settings.maxHr);
+  maxHrRef.current = settings.maxHr;
   const statusRef = useRef<Status>(resume ? 'paused' : 'searching');
   const hiddenAt = useRef<number | null>(null);
   const [status, setStatusState] = useState<Status>(statusRef.current);
@@ -56,6 +68,40 @@ export function CardioRecorder({ workoutId, weId, sport, title, resume, onFinish
   const [error, setError] = useState<string | null>(null);
   const [lostSignal, setLostSignal] = useState(false);
   useWakeLock(true);
+
+  // Пульсометр: запомненный датчик подключается сам, новый выбирается кнопкой. Связь переустанавливается при обрывах.
+  const hrSupported = platform.heartRate.unsupportedReason() === null;
+  const connectHr = useCallback((id: string, name: string) => {
+    void hrSession.current?.stop();
+    setHrName(name);
+    setHrError(null);
+    hrSession.current = startHrSession(platform.heartRate, id, {
+      sample: (s) => {
+        if (s.contact === false || s.bpm < 30 || s.bpm > 240) { setHrBpm(null); return; }
+        setHrBpm(s.bpm);
+        if (statusRef.current === 'recording') hrAcc.current = addHr(hrAcc.current, s.bpm, Date.now(), maxHrRef.current);
+      },
+      state: (st) => { setHrState(st); if (st !== 'live') setHrBpm(null); }
+    });
+  }, []);
+  useEffect(() => {
+    if (!hrSupported) return;
+    void db.kv.get(HR_DEVICE_KEY).then((row) => {
+      const d = row?.value as { id: string; name: string } | undefined;
+      if (d?.id) connectHr(d.id, d.name);
+    });
+    return () => { void hrSession.current?.stop(); hrSession.current = null; };
+  }, [hrSupported, connectHr]);
+  const pickHr = async () => {
+    setHrError(null);
+    try {
+      const d = await platform.heartRate.pick();
+      if (!d) return;
+      await db.kv.put({ key: HR_DEVICE_KEY, value: d });
+      connectHr(d.id, d.name);
+    } catch (e) { setHrError(e instanceof Error ? e.message : 'Не удалось подключить пульсометр'); }
+  };
+  const hrZone = hrBpm && settings.maxHr ? zoneFor(hrBpm, settings.maxHr) : null;
 
   // голос и вибрация на каждом пройденном километре
   const spoken = useRef(tracker.current.stats().splits.length);
@@ -69,35 +115,42 @@ export function CardioRecorder({ workoutId, weId, sport, title, resume, onFinish
       window.speechSynthesis.cancel();
       window.speechSynthesis.speak(u);
     }
-    if (settings.vibrate && 'vibrate' in navigator) navigator.vibrate(200);
+    if (settings.vibrate) platform.haptics.vibrate(200);
   }, [stats.splits, settings.voiceCues, settings.vibrate, sport]);
 
   const setStatus = (s: Status) => { statusRef.current = s; setStatusState(s); };
 
   const persist = useCallback(() => {
-    const v: ActiveRecording = { workoutId, weId, sport, savedAt: Date.now(), state: tracker.current.state };
+    const v: ActiveRecording = { workoutId, weId, sport, savedAt: Date.now(), state: tracker.current.state, ...(hrAcc.current.n > 0 ? { hr: hrAcc.current } : {}) };
     void db.kv.put({ key: ACTIVE_KEY, value: v });
   }, [workoutId, weId, sport]);
 
-  const stopWatch = () => { if (watchId.current !== null) { navigator.geolocation.clearWatch(watchId.current); watchId.current = null; } };
+  const stopWatch = () => { if (watchId.current !== null) { watchId.current.stop(); watchId.current = null; } };
 
   const startWatch = useCallback(() => {
     if (watchId.current !== null) return;
-    watchId.current = navigator.geolocation.watchPosition(
+    watchId.current = platform.geo.watch(
       (pos) => {
         setLostSignal(false);
-        setAcc(pos.coords.accuracy);
+        setAcc(pos.acc);
         if (statusRef.current === 'paused') return;
-        const fix: Fix = { t: pos.timestamp, lat: pos.coords.latitude, lon: pos.coords.longitude, acc: pos.coords.accuracy, ele: pos.coords.altitude };
+        const fix: Fix = { t: pos.t, lat: pos.lat, lon: pos.lon, acc: pos.acc, ele: pos.ele };
         if (tracker.current.push(fix) && statusRef.current === 'searching') setStatus('recording');
+        // при погашенном экране таймеры браузерного движка замедляются, и сохранение раз в секунду может не успевать:
+        // поэтому трек дополнительно сохраняем по приходу точек, не чаще раза в 10 секунд
+        if (Date.now() - lastPersistAt.current > 10_000) { lastPersistAt.current = Date.now(); persist(); }
       },
-      (err) => {
-        if (err.code === err.PERMISSION_DENIED) { setError('Доступ к местоположению запрещён. Разреши его для этого сайта в настройках браузера или введи результат вручную.'); stopWatch(); }
-        else setLostSignal(true);
+      (kind) => {
+        if (kind === 'denied') {
+          setError(platform.info.native
+            ? 'Доступ к местоположению запрещён. Разреши его для приложения в настройках телефона или введи результат вручную.'
+            : 'Доступ к местоположению запрещён. Разреши его для этого сайта в настройках браузера или введи результат вручную.');
+          stopWatch();
+        } else setLostSignal(true);
       },
-      { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+      { background: { title: 'Идёт запись маршрута', message: 'Нажми, чтобы вернуться к тренировке.' } }
     );
-  }, []);
+  }, [persist]);
 
   // запуск; при продолжении ждём нажатия «Продолжить»
   useEffect(() => {
@@ -114,17 +167,17 @@ export function CardioRecorder({ workoutId, weId, sport, title, resume, onFinish
       setRoute(tracker.current.state.points.slice());
       if (tracker.current.state.points.length) persist();
     }, 1000);
-    const onVis = () => {
-      if (document.visibilityState === 'hidden') { hiddenAt.current = Date.now(); persist(); return; }
-      if (hiddenAt.current && Date.now() - hiddenAt.current > 20000 && statusRef.current !== 'paused') {
+    const offPause = platform.lifecycle.onPause(() => { hiddenAt.current = Date.now(); persist(); });
+    const offResume = platform.lifecycle.onResume(() => {
+      // в браузере при погашенном экране точки не приходят; в нативной оболочке запись идёт и в фоне
+      if (!platform.geo.background && hiddenAt.current && Date.now() - hiddenAt.current > 20000 && statusRef.current !== 'paused') {
         tracker.current.breakSegment(); // пока экран был выключен, точки могли не записываться
         toast('Экран был выключен: часть пути могла не записаться');
       }
       hiddenAt.current = null;
-    };
-    document.addEventListener('visibilitychange', onVis);
+    });
     window.addEventListener('pagehide', persist);
-    return () => { window.clearInterval(t); document.removeEventListener('visibilitychange', onVis); window.removeEventListener('pagehide', persist); };
+    return () => { window.clearInterval(t); offPause(); offResume(); window.removeEventListener('pagehide', persist); };
   }, [persist, toast]);
 
   const pause = () => { stopWatch(); setStatus('paused'); persist(); };
@@ -134,7 +187,7 @@ export function CardioRecorder({ workoutId, weId, sport, title, resume, onFinish
     const st = tracker.current.stats();
     if (st.distanceM < 50 && !confirm('Записано меньше 50 м. Сохранить всё равно?')) return;
     stopWatch();
-    onFinish(toEntry(tracker.current));
+    onFinish(toEntry(tracker.current, hrAcc.current));
   };
   const discard = () => { if (confirm('Удалить эту запись? Пройденный путь пропадёт.')) { stopWatch(); onDiscard(); } };
 
@@ -171,6 +224,20 @@ export function CardioRecorder({ workoutId, weId, sport, title, resume, onFinish
               <div><div className="rec-num">{bike ? formatSpeedKmh(avgSpeed) : formatPace(avg)}</div><div className="sub">{bike ? 'км/ч средняя' : 'средний'}</div></div>
             </div>
           </div>
+          {hrSupported && (
+            <div className="rec-hr" aria-live="off">
+              {hrBpm ? (
+                <><span className="rec-hr-num">{hrBpm}</span> <small>уд/мин</small>{hrZone && <span className={'rec-hr-zone z' + hrZone.n}> зона {hrZone.n} · {hrZone.name}</span>}</>
+              ) : hrState === 'connecting' || hrState === 'reconnecting' ? (
+                <span className="sub">{hrName ?? 'Пульсометр'}: {hrState === 'connecting' ? 'подключаюсь…' : 'ищу связь…'}</span>
+              ) : hrState === 'live' ? (
+                <span className="sub">{hrName ?? 'Пульсометр'}: нет контакта с кожей</span>
+              ) : (
+                <button className="btn small" onClick={() => void pickHr()}>{hrState === 'failed' ? 'Пульсометр не найден: выбрать заново' : 'Подключить пульсометр'}</button>
+              )}
+              {hrError && <div className="msg-error" style={{ marginTop: 4 }}>{hrError}</div>}
+            </div>
+          )}
           <RouteMap points={route} live />
           {stats.splits.length > 0 && (
             <div className="splits-line">Последний км: {formatHMS(stats.splits[stats.splits.length - 1])}{stats.elevGainM >= 1 ? ` · набор ${Math.round(stats.elevGainM)} м` : ''}</div>
@@ -182,7 +249,7 @@ export function CardioRecorder({ workoutId, weId, sport, title, resume, onFinish
             <button className="btn primary" onClick={finish}>Завершить</button>
           </div>
           <button className="btn danger ghost block" style={{ marginTop: 6 }} onClick={discard}>Отбросить запись</button>
-          <p className="sub" style={{ textAlign: 'center', marginTop: 10 }}>Не блокируй телефон: в браузере трек пишется, только пока экран включён.</p>
+          <p className="sub" style={{ textAlign: 'center', marginTop: 10 }}>{platform.geo.background ? 'Экран можно гасить: запись продолжится в фоне.' : 'Не блокируй телефон: в браузере трек пишется, только пока экран включён.'}</p>
         </>
       )}
     </div>

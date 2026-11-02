@@ -3,11 +3,11 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import {
   averageDurationMs, bestEffortRecords, cardioSessions, currentStreakWeeks, detectPlateaus, e1rmSeries, finished, loadRatio,
-  muscleDistribution, personalRecords, weeklyDistance, weeklyStats
+  LOAD_PERIODS, muscleLoad, personalRecords, weeklyDistance, weeklyStats, type LoadMetric
 } from '../domain/analytics';
 import { avgPace, formatHMS, formatKm, formatPace } from '../cardio/geo';
 import { BodySection } from './BodySection';
-import { MUSCLE_LABELS, type Exercise, type Workout } from '../domain/types';
+import { MUSCLE_LABELS, type CheckIn, type Exercise, type Workout } from '../domain/types';
 import { formatDuration, formatNum, parseDate } from '../lib';
 import { go } from '../state/router';
 import { PhotosSection } from './PhotosSection';
@@ -15,6 +15,8 @@ import { useSettings } from '../state/settings';
 import { BarChart, HBars, LineChart } from '../ui/Charts';
 import { CountUp } from '../ui/CountUp';
 import { Heatmap } from '../ui/Heatmap';
+import { MuscleLoadTable, RoseChart } from '../ui/RoseChart';
+import { checkInSeries, seriesAverage, type SeriesMetric } from '../domain/checkin';
 
 const shortDate = (s: string) => parseDate(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 const chartDate = (s: string) => parseDate(s).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
@@ -101,6 +103,8 @@ export function StatsView() {
 
           <BodySection />
 
+          <CheckInTrends />
+
           {deep && <DeepStats workouts={workouts} exMap={exMap} />}
         </>
       )}
@@ -108,8 +112,71 @@ export function StatsView() {
   );
 }
 
+const TREND_METRICS: { key: SeriesMetric; label: string }[] = [
+  { key: 'energy', label: 'Энергия' }, { key: 'mood', label: 'Настроение' }, { key: 'soreness', label: 'Болезненность' },
+  { key: 'stress', label: 'Стресс' }, { key: 'sleepHours', label: 'Сон, ч' }
+];
+
+function CheckInTrends() {
+  const rows = useLiveQuery(() => db.checkins.toArray(), [], [] as CheckIn[]);
+  const [days, setDays] = useState<(typeof LOAD_PERIODS)[number]>(30);
+  const [metric, setMetric] = useState<SeriesMetric>('energy');
+  const points = useMemo(() => checkInSeries(rows, metric, days), [rows, metric, days]);
+  const avg = seriesAverage(points);
+  if (!rows.some((c) => !c.deletedAt)) return null; // чек-инов ещё не было: раздел не мозолит глаза
+  const seg = (on: boolean) => 'btn small ' + (on ? 'primary' : 'ghost');
+  return (
+    <div className="section">
+      <h2>Самочувствие</h2>
+      <div className="chips" role="group" aria-label="Показатель">
+        {TREND_METRICS.map((m) => <button key={m.key} className={'chip' + (metric === m.key ? ' on' : '')} aria-pressed={metric === m.key} onClick={() => setMetric(m.key)}>{m.label}</button>)}
+      </div>
+      <div style={{ display: 'flex', gap: 6, margin: '4px 0 8px' }} role="group" aria-label="Период">
+        {LOAD_PERIODS.map((d) => <button key={d} className={seg(days === d)} aria-pressed={days === d} onClick={() => setDays(d)}>{d} дн.</button>)}
+      </div>
+      <LineChart unit="" points={points.map((p) => ({ label: chartDate(p.date), value: Math.round(p.value * 10) / 10 }))} />
+      {avg !== null && <p className="sub">Среднее за период: {formatNum(Math.round(avg * 10) / 10)}. Дни без чек-ина в график не входят.</p>}
+    </div>
+  );
+}
+
+function MuscleLoadSection({ workouts, exMap }: { workouts: Workout[]; exMap: Map<string, Exercise> }) {
+  const [days, setDays] = useState<(typeof LOAD_PERIODS)[number]>(30);
+  const [metric, setMetric] = useState<LoadMetric>('sets');
+  const [view, setView] = useState<'rose' | 'list'>('rose');
+  const items = useMemo(() => muscleLoad(workouts, exMap, { days, metric }), [workouts, exMap, days, metric]);
+  const empty = items.every((m) => m.share === 0);
+  const seg = (on: boolean) => 'btn small ' + (on ? 'primary' : 'ghost');
+  return (
+    <div className="section">
+      <h2>Нагрузка по мышцам</h2>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }} role="group" aria-label="Период">
+        {LOAD_PERIODS.map((d) => <button key={d} className={seg(days === d)} aria-pressed={days === d} onClick={() => setDays(d)}>{d} дн.</button>)}
+      </div>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 6 }} role="group" aria-label="Метрика">
+          <button className={seg(metric === 'sets')} aria-pressed={metric === 'sets'} onClick={() => setMetric('sets')}>Подходы</button>
+          <button className={seg(metric === 'volume')} aria-pressed={metric === 'volume'} onClick={() => setMetric('volume')}>Тоннаж</button>
+        </div>
+        <div style={{ display: 'flex', gap: 6, marginLeft: 'auto' }} role="group" aria-label="Вид">
+          <button className={seg(view === 'list')} aria-pressed={view === 'list'} onClick={() => setView('list')}>Списки</button>
+          <button className={seg(view === 'rose')} aria-pressed={view === 'rose'} onClick={() => setView('rose')}>Роза</button>
+        </div>
+      </div>
+      {empty ? <p className="empty">За выбранный период силовых тренировок нет.</p> : (
+        <>
+          {view === 'rose'
+            ? <RoseChart items={items} unit={metric === 'sets' ? 'подходы' : 'тоннаж'} />
+            : <HBars unit={metric === 'sets' ? 'подх.' : 'кг'} rows={[...items].sort((a, b) => b.share - a.share).map((m) => ({ label: MUSCLE_LABELS[m.muscle], value: metric === 'sets' ? m.sets : Math.round(m.volume) }))} />}
+          <MuscleLoadTable items={items} metric={metric} />
+          <p className="sub">Доли считаются от твоего собственного объёма, без «идеальных» процентов. «К обычному» — отличие от среднего за последние 8 недель, в процентных пунктах. Разминка не учитывается, кардио показано отдельно.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function DeepStats({ workouts, exMap }: { workouts: Workout[]; exMap: Map<string, Exercise> }) {
-  const muscles = useMemo(() => muscleDistribution(workouts, exMap, 30), [workouts, exMap]);
   const plateaus = useMemo(() => detectPlateaus(workouts), [workouts]);
   const load = useMemo(() => loadRatio(workouts), [workouts]);
   const dur = useMemo(() => averageDurationMs(workouts), [workouts]);
@@ -145,11 +212,7 @@ function DeepStats({ workouts, exMap }: { workouts: Workout[]; exMap: Map<string
         )}
       </div>
 
-      <div className="section">
-        <h2>Подходы по мышцам за 30 дней</h2>
-        {muscles.length === 0 ? <p className="empty">За последние 30 дней тренировок нет.</p> :
-          <HBars unit="подх." rows={muscles.map((m) => ({ label: MUSCLE_LABELS[m.muscle], value: m.sets }))} />}
-      </div>
+      <MuscleLoadSection workouts={workouts} exMap={exMap} />
 
       <div className="section">
         <h2>Нагрузка</h2>

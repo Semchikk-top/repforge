@@ -12,12 +12,14 @@ import time
 import unicodedata
 from contextlib import contextmanager, nullcontext
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
+
+from .version import SCHEMA_VERSION
 
 DATA_DIR = Path(os.environ.get("WORKOUT_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
 DB_PATH = DATA_DIR / "workout.db"
 
-ALLOWED_TABLES = {"exercises", "workouts", "templates", "tracks", "body", "programs", "profile", "game"}
+ALLOWED_TABLES = {"exercises", "workouts", "templates", "tracks", "body", "programs", "profile", "game", "checkins"}
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # без похожих символов
 CODE_TTL_SEC = 10 * 60
 
@@ -137,11 +139,46 @@ def _open(p: Path) -> _Conn:
     return conn
 
 
+class SchemaTooNew(RuntimeError):
+    """База создана более новым сервером: запуск старого кода мог бы её испортить."""
+
+
+# Миграции схемы: ключ — версия, К которой приводит функция. Каждая работает внутри одной транзакции.
+# Новая версия схемы = новая функция здесь + увеличенный SCHEMA_VERSION в version.py.
+MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {}
+
+
+def schema_version(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()
+    return int(row["value"]) if row else 0
+
+
+def _migrate(conn: _Conn, target: int = SCHEMA_VERSION, migrations: dict[int, Callable[[sqlite3.Connection], None]] | None = None) -> None:
+    migrations = MIGRATIONS if migrations is None else migrations
+    cur = schema_version(conn)
+    if cur > target:
+        raise SchemaTooNew(
+            f"База данных создана более новой версией сервера (схема {cur}, эта версия понимает до {target}). "
+            "Обнови сервер, а не откатывай его: иначе данные можно повредить."
+        )
+    for v in range(cur + 1, target + 1):
+        step = migrations.get(v)
+        with tx(conn):
+            if step:
+                step(conn)
+            conn.execute("INSERT INTO meta(key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", (str(v),))
+
+
 def _initialize(conn: _Conn) -> None:
     conn.execute("PRAGMA journal_mode=WAL")
+    fresh = conn.execute("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'meta'").fetchone() is None
     conn.executescript(SCHEMA)
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('seq', '0')")
     conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('instance', ?)", (secrets.token_hex(8),))
+    if schema_version(conn) == 0:
+        # новая база сразу получает текущую схему; база от версии до появления нумерации считается схемой 1
+        conn.execute("INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)", ("1" if not fresh else str(SCHEMA_VERSION),))
+    _migrate(conn)
 
 
 def connect(path: Path | None = None) -> _ConnPool:

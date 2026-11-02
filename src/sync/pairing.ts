@@ -49,11 +49,12 @@ export async function decidePending(id: string, approve: boolean): Promise<boole
 const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 // Телефон просит подключиться: показывает PIN, ждёт подтверждения на ПК и сам завершает сопряжение.
-export async function requestPairing(opts: { signal: AbortSignal; onPin: (pin: string) => void }): Promise<void> {
+export async function requestPairing(opts: { signal: AbortSignal; onPin: (pin: string) => void; baseUrl?: string }): Promise<void> {
+  const base = opts.baseUrl ?? '';
   const deviceId = await getDeviceId();
   let res: Response;
   try {
-    res = await fetch('/api/pairing/request', {
+    res = await fetch(`${base}/api/pairing/request`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ deviceId, name: deviceLabel() }),
@@ -61,7 +62,7 @@ export async function requestPairing(opts: { signal: AbortSignal; onPin: (pin: s
     });
   } catch (e) {
     if ((e as Error).name === 'AbortError') throw e;
-    throw new Error('Сервер недоступен. Открой приложение по адресу сервера на ПК.');
+    throw new Error(base ? 'Сервер недоступен. Проверь адрес и подключение.' : 'Сервер недоступен. Открой приложение по адресу сервера на ПК.');
   }
   if (!res.ok) {
     const detail = (await res.json().catch(() => null))?.detail;
@@ -75,15 +76,15 @@ export async function requestPairing(opts: { signal: AbortSignal; onPin: (pin: s
     while (Date.now() < deadline) {
       await sleep(1500);
       if (opts.signal.aborted) throw new DOMException('Отменено', 'AbortError');
-      const r = await fetch(`/api/pairing/request/${requestId}`, { signal: opts.signal });
+      const r = await fetch(`${base}/api/pairing/request/${requestId}`, { signal: opts.signal });
       const body = (await r.json()) as { status: string; code?: string };
-      if (body.status === 'approved' && body.code) return await pairWithCode(body.code);
+      if (body.status === 'approved' && body.code) return await pairWithCode(body.code, base);
       if (body.status === 'denied') throw new Error('ПК отклонил запрос.');
       if (body.status === 'expired' || body.status === 'done') throw new Error('Время ожидания истекло. Попробуй ещё раз.');
     }
     throw new Error('Время ожидания истекло. Попробуй ещё раз.');
   } catch (e) {
-    if ((e as Error).name === 'AbortError') void fetch(`/api/pairing/request/${requestId}`, { method: 'DELETE' }).catch(() => {});
+    if ((e as Error).name === 'AbortError') void fetch(`${base}/api/pairing/request/${requestId}`, { method: 'DELETE' }).catch(() => {});
     throw e;
   }
 }

@@ -1,5 +1,5 @@
 // Рабочие экземпляры: хранилище на Dexie, транспорт WebRTC + релей. Живёт вне React.
-import { FRIEND_ICE_SERVERS, RELAY_URL } from '../nearby/config';
+import { FRIEND_ICE_SERVERS, getRelayUrl } from '../nearby/config';
 import { createPeerLink } from '../nearby/peer';
 import { connectSignaling } from '../nearby/signaling';
 import { signText } from './crypto';
@@ -31,7 +31,7 @@ export const friendLink = new FriendLink({
   peer: createPeerLink,
   // STUN/TURN включаются только явной настройкой сборки; тогда допускаются и публичные адреса
   peerOptions: FRIEND_ICE_SERVERS.length ? { iceServers: [{ urls: FRIEND_ICE_SERVERS }], allowPublic: true } : undefined,
-  relayUrl: RELAY_URL,
+  get relayUrl() { return getRelayUrl(); },
   store: friendStore,
   now: () => Date.now()
 });

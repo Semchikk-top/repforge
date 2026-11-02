@@ -1,4 +1,7 @@
 import { useMemo, useState } from 'react';
+import { CheckInCard } from './CheckInCard';
+import { TodayCard } from './TodayCard';
+import { WeeklyReviewCard } from './WeeklyReviewCard';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import type { Workout } from '../domain/types';
@@ -40,6 +43,10 @@ export function CalendarView() {
   return (
     <div>
       <div className="page-head"><h1>Календарь</h1></div>
+
+      <TodayCard />
+      <WeeklyReviewCard />
+      <CheckInCard />
 
       <div className="cal-head">
         <button className="icon-btn" onClick={() => shift(-1)} aria-label="Предыдущий месяц"><IconChevL /></button>

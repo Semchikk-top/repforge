@@ -31,6 +31,7 @@ export function conflictLabel(table: string, row: Record<string, unknown>): stri
     case 'exercises': return s('name') || 'Упражнение';
     case 'templates': case 'programs': return s('title') || 'Без названия';
     case 'body': return `Замер ${s('date')}`;
+    case 'checkins': return `Чек-ин ${s('date')} · ${s('slot') === 'evening' ? 'вечер' : 'утро'}`;
     case 'profile': return `Профиль ${s('displayName') || 'без имени'}`;
     default: return 'Запись';
   }
