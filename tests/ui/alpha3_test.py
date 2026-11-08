@@ -231,7 +231,9 @@ with sync_playwright() as p:
         pg.fill("input[placeholder='Поиск по названию']", "Бег")
         pg.click(".list .row:has-text('Бег')")
         pg.click("button:has-text('Добавить (1)')")
+        pg.click("button:has-text('На улице')")
         pg.click("button:has-text('Начать запись GPS')")
+        pg.click(".setup-screen button:has-text('Просто запись')")
         pg.wait_for_selector(".rec-screen")
         t = 1_700_000_000_000
         m = pg.evaluate("t => window.__gps.run(t, 0, 3.4, 300, 5, 120)", t)

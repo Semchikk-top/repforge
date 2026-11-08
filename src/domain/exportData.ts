@@ -10,16 +10,19 @@ export function csvCell(v: unknown): string {
   return /[";\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
+/** Время выполнения подхода: пусто, если не измерено (старые тренировки, подходы без «Начать»). Без формул и без дробей. */
+export const workSecCell = (v: unknown): string => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? String(Math.round(v)) : '');
+
 const KIND = { normal: 'обычный', drop: 'дроп-сет', restpause: 'rest-pause' } as const;
 
 /** Таблица по подходам; разделитель «;» открывается в русском Excel. BOM добавляет вызывающая сторона при сохранении. */
 export function workoutsToCsv(workouts: Workout[], exMap: Map<string, Exercise>, range: Range = {}): string {
-  const rows = [['Дата', 'Тренировка', 'Упражнение', 'Подход', 'Тип', 'Вес, кг', 'Повторы', 'RPE', 'Заметка', 'Дистанция, км', 'Время, с']];
+  const rows = [['Дата', 'Тренировка', 'Упражнение', 'Подход', 'Тип', 'Вес, кг', 'Повторы', 'RPE', 'Заметка', 'Дистанция, км', 'Время, с', 'Время подхода, с']];
   for (const w of [...workouts].filter((x) => !x.deletedAt && x.status === 'done' && inRange(x.date, range)).sort((a, b) => a.date.localeCompare(b.date))) {
     for (const we of w.exercises) {
       const name = exMap.get(we.exerciseId)?.name ?? 'Удалённое упражнение';
-      if (we.cardio) rows.push([w.date, w.title, name, '', 'кардио', '', '', '', '', (we.cardio.distanceM / 1000).toFixed(2), String(we.cardio.durationSec)]);
-      we.sets.filter((s) => s.done).forEach((s, i) => rows.push([w.date, w.title, name, String(i + 1), KIND[s.kind ?? 'normal'], String(s.weight), String(s.reps), s.rpe === undefined ? '' : String(s.rpe), s.note ?? '', '', '']));
+      if (we.cardio) rows.push([w.date, w.title, name, '', 'кардио', '', '', '', '', (we.cardio.distanceM / 1000).toFixed(2), String(we.cardio.durationSec), '']);
+      we.sets.filter((s) => s.done).forEach((s, i) => rows.push([w.date, w.title, name, String(i + 1), KIND[s.kind ?? 'normal'], String(s.weight), String(s.reps), s.rpe === undefined ? '' : String(s.rpe), s.note ?? '', '', '', workSecCell(s.workSec)]));
     }
   }
   return rows.map((r) => r.map(csvCell).join(';')).join('\r\n') + '\r\n';

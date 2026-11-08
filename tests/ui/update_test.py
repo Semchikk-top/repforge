@@ -124,7 +124,9 @@ with sync_playwright() as p:
 
     # --- пробежка: зона приватности, GPX, голос ---
     new_workout_with(pg, "Бег")
+    pg.click("button:has-text('На улице')")
     pg.click("button:has-text('Начать запись GPS')")
+    pg.click(".setup-screen button:has-text('Просто запись')")
     pg.wait_for_selector(".rec-screen")
     t0 = 1_700_000_000_000
     pg.evaluate("t => window.__gps.run(t, 0, 3, 366, 5, 100)", t0)                  # 1098 м

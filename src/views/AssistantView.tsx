@@ -100,6 +100,10 @@ export function AssistantView() {
       // ассистент читает данные на сервере: сначала отправляем туда свежие правки (но не ждём дольше 4 секунд)
       await Promise.race([syncNow(), wait(4000)]);
       for await (const ev of streamChat(backend, history, todayStr(), ctl.signal)) apply(bot.id, ev);
+      // поток закончился, а ответа нет — не оставляем пустой пузырь без объяснения
+      patch(bot.id, (m) => (m.content.trim() || m.notices?.length || m.error || m.proposals?.length
+        ? m
+        : { ...m, notices: ['Ассистент не прислал ответ. Попробуй ещё раз или проверь подключение в настройках.'] }));
     } catch (e) {
       if ((e as Error).name === 'AbortError') patch(bot.id, (m) => ({ ...m, stopped: true }));
       else patch(bot.id, (m) => ({ ...m, error: e instanceof Error ? e.message : 'Что-то пошло не так' }));

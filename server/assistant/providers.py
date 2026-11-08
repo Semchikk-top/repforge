@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, AsyncIterator
 
 import httpx
@@ -18,6 +19,11 @@ from .config import Backend
 
 Msg = dict[str, Any]
 Event = tuple[str, Any]
+
+# Параметры нативного Ollama. Thinking-модели тратят контекст на рассуждения, а при num_ctx 4096
+# ответ обрывался или не приходил вовсе, поэтому рассуждения выключены, а контекст увеличен.
+OLLAMA_NUM_CTX = int(os.environ.get("ASSISTANT_LOCAL_NUM_CTX", "16384") or 16384)
+OLLAMA_NUM_PREDICT = int(os.environ.get("ASSISTANT_LOCAL_NUM_PREDICT", "1500") or 1500)
 
 
 class ProviderError(Exception):
@@ -122,6 +128,8 @@ async def stream_anthropic(client: httpx.AsyncClient, be: Backend, system: str, 
                 elif t == "content_block_stop" and ev.get("index") in bufs:
                     b = bufs.pop(ev["index"])
                     calls.append({"id": b["id"], "name": b["name"], "args": _parse_args(b["json"])})
+                elif t == "message_delta" and ev.get("delta", {}).get("stop_reason") == "max_tokens":
+                    yield "finish", "length"
                 elif t == "error":
                     raise ProviderError(ev.get("error", {}).get("message", "Ошибка провайдера"))
     except httpx.HTTPError as e:
@@ -175,6 +183,8 @@ async def stream_openai(client: httpx.AsyncClient, be: Backend, system: str, msg
                 choices = ev.get("choices") or []
                 if not choices:
                     continue
+                if choices[0].get("finish_reason") == "length":
+                    yield "finish", "length"
                 delta = choices[0].get("delta") or {}
                 if delta.get("content"):
                     yield "text", delta["content"]
@@ -205,8 +215,127 @@ async def stream_openai(client: httpx.AsyncClient, be: Backend, system: str, msg
     yield "calls", calls
 
 
+# ---------------------------------------------------------------- Ollama (нативный /api/chat)
+
+def ollama_root(base_url: str) -> str:
+    """Адрес Ollama без суффикса /v1: в настройках хранится OpenAI-совместимый адрес."""
+    root = base_url.rstrip("/")
+    return root[:-3] if root.endswith("/v1") else root
+
+
+def to_ollama(system: str, msgs: list[Msg]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = [{"role": "system", "content": system}]
+    for m in msgs:
+        if m["role"] == "user":
+            out.append({"role": "user", "content": m["content"]})
+        elif m["role"] == "assistant":
+            item: dict[str, Any] = {"role": "assistant", "content": m.get("content") or ""}
+            if m.get("calls"):
+                item["tool_calls"] = [{"function": {"name": c["name"], "arguments": c["args"]}} for c in m["calls"]]
+            out.append(item)
+        elif m["role"] == "tool":
+            out.append({"role": "tool", "tool_name": m.get("name", ""), "content": m["content"]})
+    return out
+
+
+class _ThinkStripper:
+    """Некоторые модели кладут рассуждения прямо в content между <think>…</think>.
+    Вырезаем их из потока, даже если тег разорван между кусками."""
+
+    OPEN, CLOSE = "<think>", "</think>"
+
+    def __init__(self) -> None:
+        self.inside = False
+        self.buf = ""
+
+    def feed(self, chunk: str) -> str:
+        self.buf += chunk
+        out = ""
+        while self.buf:
+            tag = self.CLOSE if self.inside else self.OPEN
+            i = self.buf.find(tag)
+            if i >= 0:
+                if not self.inside:
+                    out += self.buf[:i]
+                self.buf = self.buf[i + len(tag):]
+                self.inside = not self.inside
+                continue
+            keep = 0  # хвост, который может оказаться началом тега
+            for n in range(min(len(tag) - 1, len(self.buf)), 0, -1):
+                if tag.startswith(self.buf[-n:]):
+                    keep = n
+                    break
+            if not self.inside:
+                out += self.buf[: len(self.buf) - keep]
+            self.buf = self.buf[len(self.buf) - keep:]
+            break
+        return out
+
+    def flush(self) -> str:
+        rest, self.buf = ("" if self.inside else self.buf), ""
+        return rest
+
+
+async def stream_ollama(client: httpx.AsyncClient, be: Backend, system: str, msgs: list[Msg], tools: list[dict[str, Any]] | None) -> AsyncIterator[Event]:
+    body: dict[str, Any] = {
+        "model": be.model,
+        "messages": to_ollama(system, msgs),
+        "stream": True,
+        "think": False,
+        "options": {"num_ctx": OLLAMA_NUM_CTX, "num_predict": OLLAMA_NUM_PREDICT},
+    }
+    if tools:
+        body["tools"] = [{"type": "function", "function": {"name": t["name"], "description": t["description"], "parameters": t["input_schema"]}} for t in tools]
+    url = f"{ollama_root(be.base_url)}/api/chat"
+    for attempt in (1, 2):
+        calls: list[dict[str, Any]] = []
+        strip = _ThinkStripper()
+        reason = ""
+        try:
+            async with client.stream("POST", url, json=body) as resp:
+                if resp.status_code != 200:
+                    err = await _error_from(resp)
+                    # старые версии Ollama и модели без поддержки рассуждений могут ругаться на параметр think
+                    if attempt == 1 and resp.status_code == 400 and "think" in str(err).lower() and not err.tools_unsupported:
+                        body.pop("think", None)
+                        continue
+                    raise err
+                async for line in resp.aiter_lines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        ev = json.loads(line)
+                    except ValueError:
+                        continue
+                    if ev.get("error"):
+                        raise ProviderError(str(ev["error"]))
+                    msg = ev.get("message") or {}
+                    text = strip.feed(msg.get("content") or "")  # message.thinking сознательно игнорируем
+                    if text:
+                        yield "text", text
+                    for i, tc in enumerate(msg.get("tool_calls") or []):
+                        fn = tc.get("function") or {}
+                        if fn.get("name"):
+                            calls.append({"id": tc.get("id") or f"call_{len(calls)}", "name": fn["name"], "args": _parse_args(fn.get("arguments"))})
+                    if ev.get("done"):
+                        reason = str(ev.get("done_reason") or "")
+        except httpx.HTTPError as e:
+            raise ProviderError(f"Нет связи с провайдером: {e.__class__.__name__}") from e
+        tail = strip.flush()
+        if tail:
+            yield "text", tail
+        if reason == "length":
+            yield "finish", "length"
+        yield "calls", calls
+        return
+
+
 def stream_for(be: Backend):
-    return stream_anthropic if be.kind == "anthropic" else stream_openai
+    """cloud и agent — через OpenAI/Anthropic-адаптеры, local (Ollama) — через нативный API."""
+    if be.kind == "anthropic":
+        return stream_anthropic
+    return stream_ollama if be.name == "local" else stream_openai
 
 
 async def detect_local_model(client: httpx.AsyncClient, be: Backend) -> str:

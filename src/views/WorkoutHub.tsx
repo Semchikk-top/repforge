@@ -10,10 +10,12 @@ import { useRoomUi } from '../nearby/RoomProvider';
 import { useRoom } from '../nearby/useRoom';
 import { GoalsCard } from '../ui/GoalsCard';
 import { StartSheet } from '../ui/StartSheet';
+import { TemplateSheet } from './TemplateSheet';
 import { useToast } from '../ui/Toast';
 
 export function WorkoutHub() {
   const [sheet, setSheet] = useState(false);
+  const [editing, setEditing] = useState<string | null>(null); // id шаблона в редакторе
   const toast = useToast();
   const roomUi = useRoomUi();
   const roomPhase = useRoom().phase;
@@ -87,6 +89,7 @@ export function WorkoutHub() {
                 <div className="title">{t.title}</div>
                 <div className="meta">{t.exercises.length} упр.</div>
               </div>
+              <button className="btn small ghost" aria-label={`Изменить шаблон ${t.title}`} onClick={() => setEditing(t.id)}>Изменить</button>
               <button className="icon-btn" aria-label={`Удалить шаблон ${t.title}`} onClick={async () => {
                 if (confirm(`Удалить шаблон «${t.title}»?`)) { await softDelete('templates', t.id); toast('Шаблон удалён'); }
               }}><IconTrash size={20} /></button>
@@ -95,6 +98,7 @@ export function WorkoutHub() {
         </div>
       </div>
 
+      {editing && (() => { const t = templates.find((x) => x.id === editing); return t ? <TemplateSheet template={t} onClose={() => setEditing(null)} /> : null; })()}
       {sheet && <StartSheet date={today} mode="start" onClose={() => setSheet(false)} />}
     </div>
   );

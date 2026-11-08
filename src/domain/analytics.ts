@@ -1,5 +1,5 @@
 import { sportOf, type Exercise, type ID, type MuscleGroup, type SetEntry, type Sport, type Workout } from './types';
-import { addDays, parseDate, toDateStr, weekStart } from '../lib';
+import { addDays, formatDuration, formatNum, parseDate, pluralRu, toDateStr, weekStart } from '../lib';
 
 export const e1rm = (weight: number, reps: number): number =>
   reps <= 0 || weight <= 0 ? 0 : reps === 1 ? weight : weight * (1 + reps / 30);
@@ -17,22 +17,85 @@ export const finished = (ws: Workout[]): Workout[] =>
 
 // ---------- основная аналитика ----------
 
-export interface WeekStat { start: string; count: number; volume: number; sets: number }
+// ---------- дневная агрегация ----------
+// Несколько тренировок за один день считаются одним тренировочным днём. Всё считается на чтении, схема базы не меняется.
+
+export interface DayStat {
+  date: string;
+  /** Фактическое число завершённых тренировок за день. */
+  sessions: number;
+  sets: number;
+  volumeKg: number;
+  /** Сумма валидных длительностей тренировок дня, без пауз между ними. */
+  durationMs: number;
+  /** Сколько тренировок дали валидную длительность. Если меньше `sessions`, время неполное. */
+  timedSessions: number;
+  cardioKm: number;
+  cardioSec: number;
+}
+
+/** Длительность тренировки, если оба времени есть, конец позже начала и разница меньше суток. */
+export function sessionDurationMs(w: Workout): number | null {
+  if (!w.startedAt || !w.finishedAt) return null;
+  const d = w.finishedAt - w.startedAt;
+  return d > 0 && d < 24 * 3600_000 ? d : null;
+}
+
+/** Статистика по дням: завершённые не удалённые тренировки, сгруппированные по `Workout.date`. По возрастанию даты. */
+export function dailyStats(all: Workout[]): DayStat[] {
+  const byDate = new Map<string, DayStat>();
+  for (const w of finished(all)) {
+    let d = byDate.get(w.date);
+    if (!d) byDate.set(w.date, (d = { date: w.date, sessions: 0, sets: 0, volumeKg: 0, durationMs: 0, timedSessions: 0, cardioKm: 0, cardioSec: 0 }));
+    d.sessions++;
+    d.sets += workoutSetsCount(w);
+    d.volumeKg += workoutVolume(w);
+    const dur = sessionDurationMs(w);
+    if (dur !== null) { d.durationMs += dur; d.timedSessions++; }
+    for (const we of w.exercises) {
+      if (!we.cardio || we.cardio.distanceM <= 0) continue;
+      d.cardioKm += we.cardio.distanceM / 1000;
+      d.cardioSec += Math.max(0, we.cardio.durationSec);
+    }
+  }
+  return [...byDate.values()].sort((a, b) => a.date.localeCompare(b.date));
+}
+
+/** Короткая сводка дня: «2 тренировки · 42 подх. · 8 500 кг · 1 ч 10 мин». Неполное время помечается «≥». */
+export function daySummaryText(d: DayStat, withSessions = true): string {
+  const parts = withSessions ? [`${d.sessions} ${pluralRu(d.sessions, 'тренировка', 'тренировки', 'тренировок')}`] : [];
+  if (d.sets > 0) parts.push(`${d.sets} подх.`);
+  if (d.volumeKg > 0) parts.push(`${formatNum(Math.round(d.volumeKg)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0')} кг`);
+  if (d.timedSessions > 0) parts.push(`${d.timedSessions < d.sessions ? '≥ ' : ''}${formatDuration(d.durationMs)}`);
+  return parts.join(' · ');
+}
+
+export function dayStat(all: Workout[], date: string): DayStat | null {
+  return dailyStats(all.filter((w) => w.date === date)).find((d) => d.date === date) ?? null;
+}
+
+/** Число тренировочных дней в диапазоне дат (границы включены, любая может быть опущена). */
+export function trainingDays(all: Workout[], from?: string, to?: string): number {
+  return dailyStats(all).filter((d) => (!from || d.date >= from) && (!to || d.date <= to)).length;
+}
+
+export interface WeekStat { start: string; days: number; sessions: number; volume: number; sets: number }
 
 export function weeklyStats(all: Workout[], weeks = 8, now = new Date()): WeekStat[] {
-  const ws = finished(all);
+  const days = dailyStats(all);
   const thisStart = weekStart(now);
   const out: WeekStat[] = [];
   for (let i = weeks - 1; i >= 0; i--) {
     const s = addDays(thisStart, -7 * i);
     const e = addDays(s, 7);
     const sStr = toDateStr(s), eStr = toDateStr(e);
-    const inWeek = ws.filter((w) => w.date >= sStr && w.date < eStr);
+    const inWeek = days.filter((d) => d.date >= sStr && d.date < eStr);
     out.push({
       start: sStr,
-      count: inWeek.length,
-      volume: inWeek.reduce((a, w) => a + workoutVolume(w), 0),
-      sets: inWeek.reduce((a, w) => a + workoutSetsCount(w), 0)
+      days: inWeek.length,
+      sessions: inWeek.reduce((a, d) => a + d.sessions, 0),
+      volume: inWeek.reduce((a, d) => a + d.volumeKg, 0),
+      sets: inWeek.reduce((a, d) => a + d.sets, 0)
     });
   }
   return out;
@@ -207,9 +270,10 @@ export function loadRatio(all: Workout[], now = new Date()): { acute: number; ch
   return { acute, chronic, ratio: chronic > 0 ? acute / chronic : null };
 }
 
-export function averageDurationMs(all: Workout[]): number | null {
-  const ds = finished(all).filter((w) => w.startedAt && w.finishedAt).map((w) => w.finishedAt! - w.startedAt!);
-  return ds.length ? ds.reduce((a, b) => a + b, 0) / ds.length : null;
+/** Средняя длительность тренировочного дня. Дни, где время известно не для всех тренировок, не берутся: иначе среднее занижено. */
+export function averageDayDurationMs(all: Workout[]): number | null {
+  const ds = dailyStats(all).filter((d) => d.sessions > 0 && d.timedSessions === d.sessions);
+  return ds.length ? ds.reduce((a, d) => a + d.durationMs, 0) / ds.length : null;
 }
 
 
@@ -275,12 +339,12 @@ export function lastCardio(all: Workout[], exerciseId: string, excludeId?: strin
 }
 
 
-// Прогресс по целям текущей недели (с понедельника): число тренировок и километры бега и ходьбы
-export function weekProgress(all: Workout[], exMap: Map<string, Exercise>, now = new Date()): { workouts: number; km: number } {
+// Прогресс по целям текущей недели (с понедельника): тренировочные дни, число тренировок и километры бега и ходьбы
+export function weekProgress(all: Workout[], exMap: Map<string, Exercise>, now = new Date()): { days: number; sessions: number; km: number } {
   const from = toDateStr(weekStart(now));
   const done = finished(all).filter((w) => w.date >= from);
   const km = cardioSessions(done, exMap).filter((x) => x.sport !== 'bike').reduce((a, x) => a + x.distanceM, 0) / 1000;
-  return { workouts: done.length, km: Math.round(km * 100) / 100 };
+  return { days: trainingDays(done), sessions: done.length, km: Math.round(km * 100) / 100 };
 }
 
 

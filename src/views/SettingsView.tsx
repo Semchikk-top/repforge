@@ -3,7 +3,8 @@ import { platform } from '../platform';
 import { BackupSection } from './BackupSection';
 import { openBackupText } from '../db/autoBackup';
 import type { ExactAlarmState } from '../platform/types';
-import { exportAll, importAll } from '../db/repo';
+import { exportAll } from '../db/repo';
+import { RestorePreview } from './RestorePreview';
 import { useSettings } from '../state/settings';
 import { Toggle } from '../ui/Toggle';
 import { useToast } from '../ui/Toast';
@@ -71,6 +72,7 @@ export function SettingsView() {
   const [astatus, setAstatus] = useState<AssistantStatus | null>(null);
   const [connect, setConnect] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [restore, setRestore] = useState<{ title: string; json: string } | null>(null);
   const [importingCsv, setImportingCsv] = useState(false);
   const refreshStatus = () => { if (sync.configured && !sync.unauthorized) void getAssistantStatus().then(setAstatus); };
   useEffect(refreshStatus, [sync.configured, sync.unauthorized]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -89,8 +91,7 @@ export function SettingsView() {
     try {
       // зашифрованную копию читаем по паролю (или ключом приложения, если она сделана здесь же)
       const text = await openBackupText(await file.text(), () => prompt('Пароль от этой копии'));
-      const r = await importAll(text);
-      toast(`Импортировано: тренировок ${r.workouts}, упражнений ${r.exercises}, шаблонов ${r.templates}`);
+      setRestore({ title: `Импорт из файла «${file.name}»`, json: text }); // записываем только после подтверждения в предпросмотре
     } catch (e) {
       toast(e instanceof Error ? e.message : 'Не удалось прочитать файл');
     }
@@ -198,9 +199,12 @@ export function SettingsView() {
           <span className="sub">Касается маршрута на экране и файла GPX: чтобы не показывать, где ты живёшь.</span>
         </div>
         <div className="row"><div className="grow">Голосовые подсказки на каждом километре</div><Toggle label="Голосовые подсказки" checked={settings.voiceCues} onChange={(v) => update({ voiceCues: v })} /></div>
+        <div className="row"><div className="grow">Голос навигации на улице<div className="sub">Повороты, сход с маршрута, финиш. Включается только тобой.</div></div><Toggle label="Голос навигации" checked={settings.voiceNav} onChange={(v) => update({ voiceNav: v })} /></div>
+        <div className="row"><div className="grow">Тренировочные подсказки<div className="sub">Половина дистанции, смена пульсовой зоны (нужен датчик и максимальный пульс), темп (нужна цель).</div></div><Toggle label="Тренировочные подсказки" checked={settings.voiceCoach} onChange={(v) => update({ voiceCoach: v })} /></div>
         <div className="row"><div className="grow">Не гасить экран во время тренировки</div><Toggle label="Не гасить экран" checked={settings.keepAwake} onChange={(v) => update({ keepAwake: v })} /></div>
         <div className="row"><div className="grow">Звук окончания отдыха</div><Toggle label="Звук" checked={settings.sound} onChange={(v) => update({ sound: v })} /></div>
         <div className="row"><div className="grow">Вибрация</div><Toggle label="Вибрация" checked={settings.vibrate} onChange={(v) => update({ vibrate: v })} /></div>
+        <div className="row"><div className="grow">Напоминать убрать инвентарь<div className="sub">После последнего рабочего подхода упражнения. Отдых начнётся после галочки. Для упражнений со своим весом и кардио не показывается.</div></div><Toggle label="Напоминать убрать инвентарь" checked={settings.cleanupEnabled} onChange={(v) => update({ cleanupEnabled: v })} /></div>
         <div className="row">
           <div className="grow">
             <div>Уведомление, когда экран выключен</div>
@@ -273,6 +277,7 @@ export function SettingsView() {
         <button className="btn block" style={{ marginTop: 8 }} onClick={() => setImportingCsv(true)}>Импорт из Hevy или Strong…</button>
         <button className="btn block" style={{ marginTop: 8 }} onClick={() => go('start')}>Подобрать стартовую программу</button>
         {exporting && <ExportSheet onClose={() => setExporting(false)} />}
+        {restore && <RestorePreview title={restore.title} json={restore.json} onClose={() => setRestore(null)} />}
         {importingCsv && <ImportWorkoutsSheet onClose={() => setImportingCsv(false)} />}
         <BackupSection />
         {persisted === false && <p className="sub" style={{ marginTop: 8 }}>Система не гарантирует сохранность данных приложения при нехватке места на телефоне. Делай экспорт или подключи синхронизацию с ПК.</p>}

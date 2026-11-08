@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import { bestEffortRecords, cardioSessions, exerciseRecords, type ExerciseRecord } from '../domain/analytics';
+import { bestEffortRecords, cardioSessions, dailyStats, daySummaryText, exerciseRecords, type ExerciseRecord } from '../domain/analytics';
 import { MUSCLE_LABELS, isCardio, type Exercise, type MuscleGroup, type Workout } from '../domain/types';
 import { formatHMS, formatKm } from '../cardio/geo';
 import { formatNum, parseDate } from '../lib';
@@ -45,6 +45,9 @@ export function RecordsView() {
   const efforts = useMemo(() => bestEffortRecords(cardio), [cardio]);
   const longest = useMemo(() => cardio.filter((x) => x.sport !== 'bike').reduce<(typeof cardio)[number] | null>((a, x) => (!a || x.distanceM > a.distanceM ? x : a), null), [cardio]);
 
+  // самый тяжёлый тренировочный день: сводка по всем тренировкам дня (рекорды упражнений «за тренировку» считаются отдельно)
+  const heaviestDay = useMemo(() => dailyStats(workouts).reduce<ReturnType<typeof dailyStats>[number] | null>((a, d) => (d.volumeKg > 0 && (!a || d.volumeKg > a.volumeKg) ? d : a), null), [workouts]);
+
   const rows = useMemo(() => {
     const q = query.trim().toLowerCase();
     const list = records
@@ -84,6 +87,17 @@ export function RecordsView() {
                 <div className="rec-value">{formatKm(longest.distanceM)} км</div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {heaviestDay && (
+        <div className="section">
+          <h2>Самый тяжёлый день</h2>
+          <div className="list">
+            <div className="row">
+              <div className="grow"><div className="title">{shortDate(heaviestDay.date)}</div><div className="meta">{daySummaryText(heaviestDay)}</div></div>
+            </div>
           </div>
         </div>
       )}

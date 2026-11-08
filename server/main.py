@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import db as store
-from . import mdns, netinfo, pairing, qr, security, version
+from . import live, mdns, netinfo, pairing, qr, security, version
 from .assistant import agent, config as acfg, providers
 
 DIST_DIR = Path(os.environ.get("WORKOUT_DIST_DIR", Path(__file__).resolve().parent.parent / "dist"))
@@ -30,6 +30,8 @@ MAX_ENTITY_BYTES = 256_000
 MAX_CHAT_CHARS = 40_000
 CLOCK_SKEW_MS = 30 * 24 * 3600 * 1000  # метка времени дальше этого срока вперёд считается подделкой
 ID_PATTERN = r"^[A-Za-z0-9_.:\-]+$"
+# Content-Encoding нужен, чтобы сжатие (GZipMiddleware) не буферизовало потоки на любой версии Starlette
+SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no", "Content-Encoding": "identity"}
 
 
 # ---------- модели запросов ----------
@@ -136,6 +138,7 @@ def make_app(db_path: Path | None = None) -> FastAPI:
     app.add_middleware(security.SecurityMiddleware)
     app.state.conn = conn
     app.state.requests = pairing.Requests()
+    app.state.bus = live.SyncBus()
     app.state.check = None  # в тестах подменяется
     app.state.client_factory = None  # в тестах подменяется на клиент с MockTransport
 
@@ -232,27 +235,96 @@ def make_app(db_path: Path | None = None) -> FastAPI:
         with store.tx(conn):
             accepted = store.apply_entities(conn, items)
             changes, more, last_seq = store.entities_since(conn, body.since, accepted)
+        if accepted:  # изменения уже зафиксированы: остальные устройства узнают о них сразу, не дожидаясь опроса
+            app.state.bus.publish(store.current_seq(conn), dev["id"])
         return {
             "seq": last_seq if more else max(last_seq, store.current_seq(conn)),
             "more": more,
             "accepted": len(accepted),
             "entities": changes,
+            "serverVersion": version.app_version(),
             "protocol": version.PROTOCOL_VERSION,
             "minClientProtocol": version.MIN_CLIENT_PROTOCOL,
             "schema": store.schema_version(conn),
             "serverTime": int(time.time() * 1000),
         }
 
+    @app.get("/api/sync/events")
+    async def sync_events(dev: sqlite3.Row = Depends(auth)):
+        """Канал «есть новые изменения» (SSE). Данных не несёт: услышав событие, клиент делает обычный POST /api/sync."""
+        bus: live.SyncBus = app.state.bus
+        if too_many("sse:" + dev["id"], 30):
+            raise HTTPException(429, "Слишком частые переподключения, подожди минуту")
+        if bus.count() >= live.MAX_SUBSCRIBERS:
+            raise HTTPException(503, "Слишком много открытых каналов синхронизации")
+        loop = asyncio.get_running_loop()
+        q: asyncio.Queue[dict] = asyncio.Queue(maxsize=16)
+        me = dev["id"]
+
+        def still_trusted() -> bool:
+            row = conn.execute("SELECT revoked FROM devices WHERE id = ?", (me,)).fetchone()
+            return bool(row) and not row["revoked"]
+
+        async def stream():
+            bus.subscribe(loop, q)  # внутри генератора: если клиент отвалится до старта потока, finally всё равно не нужен
+            try:
+                yield f"retry: 5000\nevent: hello\ndata: {json.dumps({'seq': store.current_seq(conn)})}\n\n"
+                deadline = time.monotonic() + live.MAX_SEC
+                while True:
+                    left = deadline - time.monotonic()
+                    if left <= 0:
+                        break
+                    try:
+                        ev = await asyncio.wait_for(q.get(), timeout=min(live.HEARTBEAT_SEC, left))
+                    except asyncio.TimeoutError:
+                        if not still_trusted():  # устройство отозвали: канал закрываем, не дожидаясь конца срока
+                            break
+                        yield ": ping\n\n"
+                        continue
+                    if not still_trusted():
+                        break
+                    foreign = ev["by"] != me
+                    while not q.empty():  # несколько событий подряд сводим к последнему, но чужое изменение не теряем
+                        ev = q.get_nowait()
+                        foreign = foreign or ev["by"] != me
+                    if not foreign:  # свои же правки устройству возвращать не нужно
+                        continue
+                    yield f"event: seq\ndata: {json.dumps(ev)}\n\n"
+                yield "event: bye\ndata: {}\n\n"
+            finally:
+                bus.unsubscribe(loop, q)
+
+        return StreamingResponse(stream(), media_type="text/event-stream", headers=SSE_HEADERS)
+
     @app.get("/api/devices")
     def devices(dev: sqlite3.Row = Depends(auth)):
+        store.purge_expired_devices(conn)  # карточка отозванного устройства живёт сутки, потом исчезает
         rows = conn.execute("SELECT id, name, created_at, last_seen, revoked FROM devices ORDER BY created_at").fetchall()
-        return [{**dict(r), "current": r["id"] == dev["id"]} for r in rows]
+        out = []
+        for r in rows:
+            at = store.revoked_at(r)
+            out.append({"id": r["id"], "name": r["name"], "created_at": r["created_at"], "last_seen": r["last_seen"],
+                        "revoked": 1 if at is not None else 0, "revokedAt": at,
+                        "restorableUntil": at + store.REVOKED_VISIBLE_SEC if at is not None else None,
+                        "current": r["id"] == dev["id"]})
+        return out
 
     @app.delete("/api/devices/{device_id}")
     def revoke(device_id: str, dev: sqlite3.Row = Depends(auth)):
-        cur = conn.execute("UPDATE devices SET revoked = 1 WHERE id = ?", (device_id,))
-        if cur.rowcount == 0:
+        if not store.revoke_device(conn, device_id):
             raise HTTPException(404, "Нет такого устройства")
+        return {"ok": True}
+
+    @app.post("/api/devices/{device_id}/restore")
+    def restore(device_id: str, dev: sqlite3.Row = Depends(auth)):
+        """Вернуть отозванное устройство (в течение суток после отзыва): его прежний токен снова работает."""
+        result = store.restore_device(conn, device_id)
+        if result == "not_found":
+            raise HTTPException(404, "Нет такого устройства")
+        if result == "expired":
+            raise HTTPException(410, "Прошло больше суток после отзыва: подключи устройство заново по коду")
+        if result == "not_revoked":
+            raise HTTPException(409, "Устройство не отозвано")
         return {"ok": True}
 
     # ---------- удобное сопряжение ----------
@@ -451,7 +523,7 @@ def make_app(db_path: Path | None = None) -> FastAPI:
             except Exception as e:  # поток уже начался: ошибку отдаём событием
                 yield f"data: {json.dumps({'type': 'error', 'message': f'Внутренняя ошибка: {e.__class__.__name__}'}, ensure_ascii=False)}\n\n"
 
-        return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+        return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
 
     # ---------- раздача клиента ----------
     @app.get("/{path:path}", include_in_schema=False)

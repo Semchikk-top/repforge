@@ -137,6 +137,7 @@ export class RoomStore {
   }
 
   _resume(conn, msg) {
+    if (conn.room) return this._err(conn, 'bad-message', 'Уже в комнате');
     if (!this.limiter.allow(`join:${conn.ip}`, this.limits.join, 60_000)) return this._err(conn, 'rate-limit', 'Слишком много попыток');
     const code = normalizeCode(msg.code);
     const room = code && this.rooms.get(code);

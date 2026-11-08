@@ -41,7 +41,7 @@ export function Avatar({ avatarId = DEFAULTS.avatar, frameId = DEFAULTS.frame, n
       style={{ width: size, height: size, padding: pad } as CSSProperties}
       {...(interactive ? { type: 'button' as const, onClick: onTap, 'aria-label': 'Аватар' } : {})}
     >
-      {fr.css === 'fr-rainbow' && <span className="av-ring"><i className="av-spinner" /></span>}
+      {(fr.css === 'fr-rainbow' || fr.css === 'fr-aurora') && <span className="av-ring"><i className="av-spinner" /></span>}
       {body}
       {poke > 0 && <span key={poke} className="av-sparks" aria-hidden="true">{Array.from({ length: 6 }, (_, i) => <i key={i} style={{ '--a': `${i * 60}deg` } as CSSProperties} />)}</span>}
     </Tag>

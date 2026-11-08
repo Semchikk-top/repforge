@@ -33,7 +33,7 @@ export function WeeklyReviewCard() {
   return (
     <div className="section" role="region" aria-label="Недельный разбор">
       <h2>Итоги недели {review.weekStart.slice(5).split('-').reverse().join('.')}–{review.weekEnd.slice(5).split('-').reverse().join('.')}</h2>
-      <p>Тренировок {t.workouts}{review.previous.workouts ? ` (неделей раньше ${review.previous.workouts})` : ''}, подходов {t.sets}, тоннаж {formatNum(Math.round(t.volume))} кг.</p>
+      <p>Тренировочных дней {t.days}{t.sessions > t.days ? ` (тренировок ${t.sessions})` : ''}{review.previous.days ? `, неделей раньше ${review.previous.days}` : ''}, подходов {t.sets}, тоннаж {formatNum(Math.round(t.volume))} кг.</p>
       {review.suggestions.map((s) => <p key={s}>{s}</p>)}
       <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
         <button className="btn small" onClick={() => setOpen(true)}>Подробнее</button>

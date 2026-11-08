@@ -32,7 +32,7 @@ export function ProgramsView() {
     const exMap = new Map<string, Exercise>(exs.map((e) => [e.id, e]));
     const { slots, skippedPast, missingTemplates } = planProgram({ program, templates: tplMap, existing: workouts, history: workouts, exMap });
     for (const sl of slots) {
-      await newWorkout({ date: sl.date, status: 'planned', title: sl.title, exercises: sl.exercises, programId: program.id, programSlot: sl.programSlot });
+      await newWorkout({ date: sl.date, status: 'planned', title: sl.title, exercises: sl.exercises, programId: program.id, programSlot: sl.programSlot, templateId: sl.templateId });
     }
     const parts = [slots.length ? `Назначено тренировок: ${slots.length}` : 'Новых тренировок нет'];
     if (skippedPast) parts.push(`прошедших дат пропущено: ${skippedPast}`);

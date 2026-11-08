@@ -23,3 +23,6 @@ export const IconSend = mk(<path d="M12 19V5M6 11l6-6 6 6" />);
 export const IconStop = mk(<rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />);
 export const IconNearby = mk(<><circle cx="8" cy="8" r="3" /><path d="M2.5 19.5c0-3.2 2.4-5.5 5.5-5.5s5.5 2.3 5.5 5.5" /><circle cx="17.5" cy="9" r="2.4" /><path d="M16.2 14.3c3.1-.2 5.3 1.6 5.3 4.4" /></>);
 export const IconSwap = mk(<><path d="M4 8h14M14 4l4 4-4 4" /><path d="M20 16H6M10 12l-4 4 4 4" /></>);
+export const IconGrip = mk(<path d="M5 8h14M5 12h14M5 16h14" />);
+export const IconArrowUp = mk(<path d="M12 19V5M6 11l6-6 6 6" />);
+export const IconArrowDown = mk(<path d="M12 5v14M6 13l6 6 6-6" />);

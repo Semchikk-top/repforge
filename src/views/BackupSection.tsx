@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { autoBackupSupported, lastBackupAt, listAutoBackups, restoreAutoBackup, runAutoBackup } from '../db/autoBackup';
+import { autoBackupSupported, lastBackupAt, listAutoBackups, readAutoBackup, runAutoBackup } from '../db/autoBackup';
+import { loadSnapshot, type SnapshotMeta } from '../db/premigration';
+import { RestorePreview } from './RestorePreview';
 import { useSettings } from '../state/settings';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
@@ -16,8 +18,10 @@ export function BackupSection() {
   const [last, setLast] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [list, setList] = useState(false);
+  const [preview, setPreview] = useState<{ title: string; json: string } | null>(null);
+  const [snap, setSnap] = useState<{ meta: SnapshotMeta; json: string } | null>(null);
 
-  const reload = useCallback(async () => { setItems(await listAutoBackups()); setLast(await lastBackupAt()); }, []);
+  const reload = useCallback(async () => { setItems(await listAutoBackups()); setLast(await lastBackupAt()); setSnap(await loadSnapshot()); }, []);
   useEffect(() => { void reload(); }, [reload]);
 
   if (!autoBackupSupported()) return null;
@@ -31,13 +35,12 @@ export function BackupSection() {
     } catch (e) { toast(e instanceof Error ? e.message : 'Не удалось сделать копию'); } finally { setBusy(false); }
   };
 
+  // восстановление идёт через предпросмотр: сначала читаем и проверяем копию, пишем только после подтверждения
   const restore = async (it: Item) => {
-    if (!confirm(`Восстановить данные из копии от ${fmtDate(it.parsed.date)} (версия ${it.parsed.version})? Записи из копии добавятся к текущим, совпадающие по номеру будут заменены.`)) return;
     try {
-      const r = await restoreAutoBackup(it.name);
-      toast(`Восстановлено: тренировок ${r.workouts}, упражнений ${r.exercises}, шаблонов ${r.templates}`);
+      setPreview({ title: `Копия от ${fmtDate(it.parsed.date)} (версия ${it.parsed.version})`, json: await readAutoBackup(it.name) });
       setList(false);
-    } catch (e) { toast(e instanceof Error ? e.message : 'Не удалось восстановить'); }
+    } catch (e) { toast(e instanceof Error ? e.message : 'Не удалось прочитать копию'); }
   };
 
   return (
@@ -55,6 +58,13 @@ export function BackupSection() {
         <button className="btn" style={{ flex: 1 }} disabled={busy} onClick={() => void now()}>{busy ? 'Копирую…' : 'Сделать копию сейчас'}</button>
         <button className="btn" style={{ flex: 1 }} disabled={items.length === 0} onClick={() => setList(true)}>Восстановить…</button>
       </div>
+      {snap && (
+        <p className="sub" style={{ marginTop: 8 }}>
+          Перед обновлением базы данных (схема {snap.meta.fromVersion} → {snap.meta.toVersion}) приложение сохранило снимок от {new Date(snap.meta.at).toLocaleString('ru-RU', { dateStyle: 'short', timeStyle: 'short' })}: тренировок {snap.meta.workouts}.{' '}
+          <button className="btn small ghost" onClick={() => setPreview({ title: 'Снимок перед обновлением базы', json: snap.json })}>Посмотреть и восстановить</button>
+        </p>
+      )}
+      {preview && <RestorePreview title={preview.title} json={preview.json} onDone={() => void reload()} onClose={() => setPreview(null)} />}
       {list && (
         <Sheet title="Автокопии" onClose={() => setList(false)}>
           <div className="export-list">

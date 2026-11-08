@@ -78,20 +78,29 @@ def _pick(ov: dict[str, dict[str, str]] | None, section: str, key: str, env_valu
     return v or env_value
 
 
+def _app_value(ov: dict[str, dict[str, str]] | None, section: str, key: str) -> str:
+    return ((ov or {}).get(section) or {}).get(key, "").strip()
+
+
+def _same_url(a: str, b: str) -> bool:
+    return a.strip().rstrip("/").lower() == b.strip().rstrip("/").lower()
+
+
 def cloud_backend(ov: dict[str, dict[str, str]] | None = None) -> Backend:
     kind = (_pick(ov, "cloud", "provider", _env("ASSISTANT_CLOUD_PROVIDER", "anthropic"))).lower()
-    if kind == "anthropic":
-        return Backend(
-            "cloud", "anthropic",
-            _pick(ov, "cloud", "base_url", _env("ASSISTANT_CLOUD_BASE_URL", "https://api.anthropic.com")),
-            _pick(ov, "cloud", "api_key", _env("ANTHROPIC_API_KEY") or _env("ASSISTANT_CLOUD_API_KEY")),
-            _pick(ov, "cloud", "model", _env("ASSISTANT_CLOUD_MODEL", "claude-sonnet-5-5")),
-        )
+    anth = kind == "anthropic"
+    env_url = _env("ASSISTANT_CLOUD_BASE_URL", "https://api.anthropic.com" if anth else "https://api.openai.com/v1")
+    app_url = _app_value(ov, "cloud", "base_url")
+    # Ключ из окружения сервера принадлежит адресу из окружения. Если адрес заменили из приложения, этот ключ не должен
+    # уйти на новый адрес: иначе любое подключённое устройство могло бы вытащить его, указав свой сервер.
+    env_key = (_env("ANTHROPIC_API_KEY") or _env("ASSISTANT_CLOUD_API_KEY")) if anth else (_env("ASSISTANT_CLOUD_API_KEY") or _env("OPENAI_API_KEY"))
+    if app_url and not _same_url(app_url, env_url):
+        env_key = ""
     return Backend(
-        "cloud", "openai",
-        _pick(ov, "cloud", "base_url", _env("ASSISTANT_CLOUD_BASE_URL", "https://api.openai.com/v1")),
-        _pick(ov, "cloud", "api_key", _env("ASSISTANT_CLOUD_API_KEY") or _env("OPENAI_API_KEY")),
-        _pick(ov, "cloud", "model", _env("ASSISTANT_CLOUD_MODEL")),
+        "cloud", "anthropic" if anth else "openai",
+        app_url or env_url,
+        _pick(ov, "cloud", "api_key", env_key),
+        _pick(ov, "cloud", "model", _env("ASSISTANT_CLOUD_MODEL", "claude-sonnet-5-5" if anth else "")),
     )
 
 
@@ -105,10 +114,15 @@ def local_backend(ov: dict[str, dict[str, str]] | None = None) -> Backend:
 
 
 def agent_backend(ov: dict[str, dict[str, str]] | None = None) -> Backend:
+    env_url = _env("ASSISTANT_AGENT_URL")
+    app_url = _app_value(ov, "agent", "url")
+    env_token = _env("ASSISTANT_AGENT_TOKEN")
+    if app_url and not _same_url(app_url, env_url):
+        env_token = ""  # токен из окружения не отправляем на адрес, который задали из приложения
     return Backend(
         "agent", "openai",
-        _pick(ov, "agent", "url", _env("ASSISTANT_AGENT_URL")).rstrip("/"),
-        _pick(ov, "agent", "token", _env("ASSISTANT_AGENT_TOKEN")),
+        (app_url or env_url).rstrip("/"),
+        _pick(ov, "agent", "token", env_token),
         _pick(ov, "agent", "model", _env("ASSISTANT_AGENT_MODEL")),
     )
 
@@ -132,16 +146,16 @@ def validate_url(section: str, url: str) -> str | None:
         return "Некорректный адрес"
     if u.scheme not in ("http", "https") or not host or u.username or u.password:
         return "Нужен адрес вида http://127.0.0.1:11434/v1 (без логина и пароля)"
-    if section == "cloud":
-        if u.scheme != "https" and host not in ("127.0.0.1", "localhost", "::1"):
-            return "Облачный провайдер должен быть доступен по https://"
-        return None
     try:
         ip = ipaddress.ip_address(host)
         if ip.is_link_local or ip.is_multicast or ip.is_unspecified:  # в том числе 169.254.169.254 (метаданные облачных VM)
             return "Этот адрес не подходит"
     except ValueError:
         pass
+    if section == "cloud":
+        if u.scheme != "https" and host not in ("127.0.0.1", "localhost", "::1"):
+            return "Облачный провайдер должен быть доступен по https://"
+        return None
     if not security.host_allowed(host):
         return "Локальный адрес должен вести на этот ПК или в частную сеть (localhost, 192.168.x.x, *.local, *.ts.net)"
     return None

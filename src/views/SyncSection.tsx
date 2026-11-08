@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import { apiFetch, getServerUrl, pairWithCode, syncNow, unpair } from '../sync/sync';
+import { apiFetch, getServerUrl, pairWithCode, probeAccess, syncNow, unpair } from '../sync/sync';
 import { normalizeServerUrl, parsePairLink } from '../sync/server-url';
 import { platform } from '../platform';
 import { confirmServer } from '../sync/pairLink';
 import { useSyncStatus } from '../sync/useSync';
 import { clockMessage, clockProblem } from '../sync/clock';
 import { useToast } from '../ui/Toast';
+import { canRestore, revokedLabel, visibleDevices, type DeviceInfo } from '../sync/devices';
 import { requestPairing } from '../sync/pairing';
 import { InviteSheet } from './InviteSheet';
 
-interface Dev { id: string; name: string; last_seen: number | null; revoked: number; current: boolean }
+type Dev = DeviceInfo;
 
 const fmt = (ms: number) => new Date(ms).toLocaleString('ru-RU', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
 
@@ -23,6 +24,7 @@ export function SyncSection() {
   const [server, setServer] = useState('');
   const [busy, setBusy] = useState(false);
   const [devices, setDevices] = useState<Dev[]>([]);
+  const [nowSec, setNowSec] = useState(() => Math.floor(Date.now() / 1000));
   const [invite, setInvite] = useState(false);
   const [waitPin, setWaitPin] = useState<string | null>(null);
   const reqCtl = useRef<AbortController | null>(null);
@@ -34,6 +36,12 @@ export function SyncSection() {
       const r = await apiFetch('/api/devices');
       if (r.ok) setDevices(await r.json());
     } catch { /* офлайн: список не обязателен */ }
+  }, []);
+
+  // раз в минуту пересчитываем, какие отозванные устройства ещё показывать: карточка пропадает сама, когда выходят сутки
+  useEffect(() => {
+    const t = setInterval(() => setNowSec(Math.floor(Date.now() / 1000)), 60_000);
+    return () => clearInterval(t);
   }, []);
 
   // в нативной оболочке сервер указывают явно; после разрыва подставляем прежний адрес
@@ -101,6 +109,17 @@ export function SyncSection() {
     void loadDevices();
   };
 
+  const restore = async (d: Dev) => {
+    try {
+      const r = await apiFetch(`/api/devices/${d.id}/restore`, { method: 'POST' });
+      if (r.ok) toast(`«${d.name}» снова подключено`);
+      else if (r.status === 410) toast('Прошло больше суток после отзыва: подключи устройство заново по коду');
+      else if (r.status === 404) toast('Устройство уже удалено из списка');
+      else toast('Не удалось вернуть устройство');
+    } catch { toast('Нет связи с сервером'); }
+    void loadDevices();
+  };
+
   if (!st.configured) {
     return (
       <div className="section">
@@ -149,20 +168,22 @@ export function SyncSection() {
         <button className="btn small" disabled={st.syncing || st.unauthorized} onClick={() => void syncNow()}>Сейчас</button>
       </div>
       {st.incompat && <p className="sub" style={{ color: 'var(--danger)' }}>{st.error}</p>}
+      {!st.incompat && <p className="sub">{st.live === 'live' ? 'Изменения с других устройств приходят сразу.' : 'Изменения с других устройств подтягиваются раз в 30 секунд.'}</p>}
       {clockProblem(st.clock) && <p className="sub" style={{ color: 'var(--danger)' }}>{clockMessage(clockProblem(st.clock)!)}</p>}
       <div className="row"><div className="grow">Изменений в очереди</div><span>{pending}</span></div>
       <button className="btn primary block" style={{ marginTop: 12 }} onClick={() => setInvite(true)} disabled={st.unauthorized}>Подключить телефон рядом</button>
 
-      {devices.length > 0 && (
+      {visibleDevices(devices, nowSec).length > 0 && (
         <>
           <h2 style={{ marginTop: 16, fontSize: 18 }}>Устройства</h2>
-          {devices.map((d) => (
+          {visibleDevices(devices, nowSec).map((d) => (
             <div key={d.id} className="row">
               <div className="grow">
                 <div>{d.name}{d.current ? ' (это устройство)' : ''}</div>
-                <div className="meta">{d.revoked ? 'Отозвано' : d.last_seen ? `Был: ${fmt(d.last_seen * 1000)}` : 'Не заходило'}</div>
+                <div className="meta">{d.revoked ? revokedLabel(d, nowSec) : d.last_seen ? `Был: ${fmt(d.last_seen * 1000)}` : 'Не заходило'}</div>
               </div>
               {!d.current && !d.revoked && <button className="btn small danger" onClick={() => revoke(d)}>Отозвать</button>}
+              {!d.current && canRestore(d, nowSec) && <button className="btn small" onClick={() => void restore(d)}>Восстановить</button>}
             </div>
           ))}
         </>
@@ -175,6 +196,8 @@ export function SyncSection() {
             <input id="pair-code2" className="input" value={code} autoCapitalize="characters" autoComplete="off" onChange={(e) => setCode(e.target.value)} />
           </div>
           <button className="btn primary block" disabled={busy || code.trim().length < 4} onClick={connect}>Подключить заново</button>
+          <button className="btn block" style={{ marginTop: 8 }} onClick={() => void probeAccess(true).then((ok) => toast(ok ? 'Доступ восстановлен' : 'Доступа пока нет: устройство ещё отозвано'))}>Проверить доступ</button>
+          <p className="sub">Если устройство вернули на ПК или другом телефоне, доступ вернётся сам в течение нескольких минут.</p>
         </>
       ) : null}
       <button className="btn danger ghost block" style={{ marginTop: 10 }} onClick={disconnect}>Отключить это устройство</button>

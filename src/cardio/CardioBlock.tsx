@@ -4,17 +4,20 @@ import { db } from '../db/db';
 import { download } from '../db/exporter';
 import { putTrack, softDelete } from '../db/repo';
 import { lastCardio } from '../domain/analytics';
-import { sportOf, type CardioEntry, type Exercise, type Workout, type WorkoutExercise } from '../domain/types';
+import { INTERVAL_ROLE_LABELS, PLACE_LABELS, sportOf, type CardioEntry, type CardioPlace, type Exercise, type IntervalLap, type IntervalPlan, type PlannedRoute, type Workout, type WorkoutExercise } from '../domain/types';
 import { uid } from '../lib';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
-import { CardioRecorder, clearActive, gpsSupport, loadActive, toEntry, type ActiveRecording } from './CardioRecorder';
+import { CardioRecorder, clearActive, gpsSupport, lapsOf, loadActive, toEntry, type ActiveRecording } from './CardioRecorder';
 import { RouteMap } from './RouteMap';
+import { OutdoorSetup, type OutdoorChoice } from './OutdoorSetup';
 import { estimateMaxHr, validHr, zoneFor, zoneRanges } from './hr';
 import { ElevationChart, RouteCompare } from './CardioExtras';
 import { useSettings } from '../state/settings';
 import { toGpx, trimRoute } from './gpx';
 import { Tracker, analyzeSplits, avgPace, decodePoint, elevationFromPoints, formatHMS, formatKm, formatPace, formatSpeedKmh, type TrackPoint } from './geo';
+
+const LAST_PLACE_KEY = 'cardio.lastPlace';
 
 interface Props {
   workout: Workout;
@@ -32,7 +35,11 @@ export function CardioBlock({ workout, we, exercise, history, onBegin, onSave }:
   const bike = sport === 'bike';
   const c = we.cardio;
 
-  const [rec, setRec] = useState<{ resume?: ActiveRecording } | null>(null);
+  const [rec, setRec] = useState<{ resume?: ActiveRecording; plan?: PlannedRoute | null; target?: number | null; intervals?: IntervalPlan | null } | null>(null);
+  // где тренировка: выбор запоминается как последний, но сам не применяется: каждый раз спрашиваем
+  const [place, setPlace] = useState<CardioPlace | null>(null);
+  const [lastPlace, setLastPlace] = useState<CardioPlace | null>(null);
+  const [setup, setSetup] = useState(false);
   const [minimized, setMinimized] = useState(false);
   const [pending, setPending] = useState<ActiveRecording | null>(null);
   const [manual, setManual] = useState(false);
@@ -44,6 +51,11 @@ export function CardioBlock({ workout, we, exercise, history, onBegin, onSave }:
   useEffect(() => {
     void loadActive().then((a) => { if (a && a.weId === we.id && a.workoutId === workout.id) setPending(a); });
   }, [we.id, workout.id]);
+
+  useEffect(() => {
+    void db.kv.get(LAST_PLACE_KEY).then((row) => { const v = row?.value; if (v === 'outdoor' || v === 'indoor') setLastPlace(v); });
+  }, []);
+  const choosePlace = (p: CardioPlace) => { setPlace(p); setLastPlace(p); void db.kv.put({ key: LAST_PLACE_KEY, value: p }); };
 
   const track = useLiveQuery(() => (c?.trackId ? db.tracks.get(c.trackId) : undefined), [c?.trackId]);
   const fullRoute = useMemo(() => (track && !track.deletedAt ? track.points.map(decodePoint) : []), [track]);
@@ -77,11 +89,17 @@ export function CardioBlock({ workout, we, exercise, history, onBegin, onSave }:
     await onSave(undefined);
   };
 
-  const begin = (resume?: ActiveRecording) => { onBegin(); setPending(null); setMinimized(false); setRec({ resume }); };
+  const begin = (resume?: ActiveRecording, choice?: OutdoorChoice) => {
+    onBegin(); setPending(null); setMinimized(false); setSetup(false);
+    setRec({ resume, plan: choice?.plan ?? null, target: choice?.targetPaceSecPerKm ?? null, intervals: choice?.intervals ?? null });
+  };
 
   const finishPending = async () => {
     if (!pending) return;
-    const { entry, track: pts } = toEntry(new Tracker(sport, pending.state), pending.hr);
+    const tracker = new Tracker(sport, pending.state);
+    const { entry, track: pts } = toEntry(tracker, pending.hr, pending.place);
+    const laps = lapsOf(pending, tracker);
+    if (laps.length) entry.laps = laps; // интервальная запись, восстановленная после перезапуска
     if (entry.distanceM < 20) { await clearActive(); setPending(null); toast('Запись была слишком короткой, отброшена'); return; }
     await saveRecording(entry, pts);
   };
@@ -113,16 +131,38 @@ export function CardioBlock({ workout, we, exercise, history, onBegin, onSave }:
 
       {!c && !rec && !pending && (
         <>
-          <div className="conn-actions" style={{ marginTop: 10 }}>
-            <button className="btn primary" disabled={!!gpsNote} onClick={() => begin()}>Начать запись GPS</button>
-            <button className="btn" onClick={() => setManual(true)}>Ввести вручную</button>
+          <div className="field" style={{ marginTop: 10 }}>
+            <label>Где тренировка?</label>
+            <div className="place-pick" role="group" aria-label="Где тренировка">
+              {(['outdoor', 'indoor'] as CardioPlace[]).map((p) => (
+                <button key={p} className={'btn' + (place === p ? ' on' : '')} aria-pressed={place === p} onClick={() => choosePlace(p)}>{PLACE_LABELS[p]}</button>
+              ))}
+            </div>
+            {lastPlace && !place && <span className="sub">В прошлый раз: {PLACE_LABELS[lastPlace].toLowerCase()}. Выбери, где сегодня.</span>}
           </div>
-          {gpsNote && <p className="sub" style={{ marginTop: 8 }}>{gpsNote}</p>}
+          {place === 'outdoor' && (
+            <>
+              <div className="conn-actions" style={{ marginTop: 6 }}>
+                <button className="btn primary" disabled={!!gpsNote} onClick={() => setSetup(true)}>Начать запись GPS</button>
+                <button className="btn" onClick={() => setManual(true)}>Ввести вручную</button>
+              </div>
+              {gpsNote && <p className="sub" style={{ marginTop: 8 }}>{gpsNote}</p>}
+            </>
+          )}
+          {place === 'indoor' && (
+            <>
+              <div className="conn-actions" style={{ marginTop: 6 }}>
+                <button className="btn primary" onClick={() => setManual(true)}>Ввести результат</button>
+              </div>
+              <p className="sub" style={{ marginTop: 8 }}>В помещении GPS и карта не используются: введи дистанцию и время с дорожки или тренажёра.</p>
+            </>
+          )}
         </>
       )}
 
       {c && (
         <>
+          {c.place && <div className="sub">{PLACE_LABELS[c.place]}</div>}
           <div className="cardio-grid">
             <div><div className="cardio-num">{formatKm(c.distanceM)}</div><div className="sub">км</div></div>
             <div><div className="cardio-num">{formatHMS(c.durationSec)}</div><div className="sub">время</div></div>
@@ -134,6 +174,7 @@ export function CardioBlock({ workout, we, exercise, history, onBegin, onSave }:
           {elevation && <ElevationChart profile={elevation} />}
           {hiddenByZone && <p className="sub">Маршрут короче зоны приватности ({settings.privacyZoneM} м с каждого конца), поэтому скрыт.</p>}
           {route.length > 1 && settings.privacyZoneM > 0 && <p className="sub">Начало и конец маршрута скрыты (зона приватности {settings.privacyZoneM} м).</p>}
+          {c.laps && c.laps.length > 0 && <Laps laps={c.laps} bike={bike} />}
           {c.splits && c.splits.length > 0 && <Splits splits={c.splits} bike={bike} />}
           {analysis && !bike && <p className="sub" style={{ marginTop: 8 }}>{analysis.text}</p>}
           {c.best && Object.keys(c.best).length > 0 && (
@@ -156,6 +197,7 @@ export function CardioBlock({ workout, we, exercise, history, onBegin, onSave }:
         <div style={{ display: minimized ? 'none' : undefined }}>
           <CardioRecorder
             workoutId={workout.id} weId={we.id} sport={sport} title={exercise?.name ?? 'Запись'} resume={rec.resume}
+            place={rec.resume ? rec.resume.place : 'outdoor'} plan={rec.plan} targetPaceSecPerKm={rec.target} intervals={rec.intervals}
             onFinish={(r) => void saveRecording(r.entry, r.track)}
             onDiscard={async () => { await clearActive(); setRec(null); setMinimized(false); }}
             onMinimize={() => setMinimized(true)}
@@ -163,11 +205,31 @@ export function CardioBlock({ workout, we, exercise, history, onBegin, onSave }:
         </div>
       )}
 
+      {setup && <OutdoorSetup sport={sport} onStart={(choice) => begin(undefined, choice)} onClose={() => setSetup(false)} />}
+
       {compare && c && <RouteCompare workoutId={workout.id} current={c} currentRoute={fullRoute} zoneM={settings.privacyZoneM} bike={bike} onClose={() => setCompare(false)} />}
 
       {pulse && c && <PulseSheet entry={c} onClose={() => setPulse(false)} onSave={async (e) => { await onSave(e); setPulse(false); }} />}
 
-      {manual && <ManualCardio initial={c} bike={bike} onClose={() => setManual(false)} onSave={async (entry) => { await onSave(entry); setManual(false); }} />}
+      {manual && <ManualCardio initial={c} bike={bike} onClose={() => setManual(false)} onSave={async (entry) => { await onSave(place && !entry.place ? { ...entry, place } : entry); setManual(false); }} />}
+    </div>
+  );
+}
+
+function Laps({ laps, bike }: { laps: IntervalLap[]; bike: boolean }) {
+  return (
+    <div className="laps" aria-label="Интервалы">
+      {laps.map((l, i) => {
+        const pace = avgPace(l.distanceM, l.sec);
+        return (
+          <div key={i} className="lap">
+            <span className="grow">{INTERVAL_ROLE_LABELS[l.role]}{l.skipped ? ' (пропущен)' : l.partial ? ' (не закончен)' : ''}</span>
+            <span>{formatHMS(l.sec)}</span>
+            <span>{l.distanceM} м</span>
+            <span>{l.distanceM >= 20 && l.sec > 0 ? (bike ? `${formatSpeedKmh(l.distanceM / l.sec)} км/ч` : `${formatPace(pace)} /км`) : '—'}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -213,7 +275,7 @@ function ManualCardio({ initial, bike, onSave, onClose }: { initial?: CardioEntr
         <span className="sub">часы · минуты · секунды</span>
       </div>
       {valid && <p className="sub">{bike ? `Средняя скорость ${formatSpeedKmh(distanceM / durationSec)} км/ч` : `Средний темп ${formatPace(avgPace(distanceM, durationSec))} мин/км`}</p>}
-      <button className="btn primary block" disabled={!valid} onClick={() => void onSave({ source: 'manual', distanceM, durationSec, ...(initial?.hrAvg ? { hrAvg: initial.hrAvg } : {}), ...(initial?.hrMax ? { hrMax: initial.hrMax } : {}) })}>Сохранить</button>
+      <button className="btn primary block" disabled={!valid} onClick={() => void onSave({ source: 'manual', distanceM, durationSec, ...(initial?.place ? { place: initial.place } : {}), ...(initial?.hrAvg ? { hrAvg: initial.hrAvg } : {}), ...(initial?.hrMax ? { hrMax: initial.hrMax } : {}) })}>Сохранить</button>
     </Sheet>
   );
 }

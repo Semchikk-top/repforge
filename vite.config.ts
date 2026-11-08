@@ -51,7 +51,8 @@ export default defineConfig(({ mode }) => {
       workbox: {
         // woff не нужен: современные браузеры берут woff2, а старый формат удваивал precache.
         globPatterns: ['**/*.{js,css,html,svg,png,woff2}'],
-        globIgnores: ['**/native-shell-*.js'],
+        // карта (MapLibre ≈ 1,6 МБ) нужна только тому, кто нажал «Показать карту»: в предзагрузку не кладём
+        globIgnores: ['**/native-shell-*.js', '**/maplibre-gl-*'],
         navigateFallbackDenylist: [/^\/api\//]
       }
     })])

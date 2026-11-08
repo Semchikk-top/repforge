@@ -6,7 +6,7 @@ import type { Exercise, Workout } from '../domain/types';
 import { formatNum } from '../lib';
 import { useSettings } from '../state/settings';
 
-// Цели недели: сколько тренировок и километров осталось до плана
+// Цели недели: сколько тренировочных дней и километров осталось до плана (несколько тренировок за день считаются одним днём)
 export function GoalsCard({ workouts }: { workouts: Workout[] }) {
   const { settings } = useSettings();
   const exercises = useLiveQuery(() => db.exercises.toArray(), [], [] as Exercise[]);
@@ -32,7 +32,7 @@ export function GoalsCard({ workouts }: { workouts: Workout[] }) {
   return (
     <div className="goal-card" aria-label="Цели недели">
       <h2 style={{ margin: '0 0 10px', fontSize: 18 }}>Цель недели</h2>
-      {gw > 0 && <Row label="Тренировки" value={prog.workouts} goal={gw} unit="" />}
+      {gw > 0 && <Row label="Тренировки" value={prog.days} goal={gw} unit="" />}
       {gk > 0 && <Row label="Бег и ходьба" value={prog.km} goal={gk} unit="км" />}
     </div>
   );

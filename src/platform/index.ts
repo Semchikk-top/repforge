@@ -21,7 +21,8 @@ export const platform: Platform = {
   get files() { return current.files; },
   get heartRate() { return current.heartRate; },
   get backups() { return current.backups; },
-  get scanner() { return current.scanner; }
+  get scanner() { return current.scanner; },
+  get speech() { return current.speech; }
 };
 
 export const isNative = (): boolean => current.info.native;

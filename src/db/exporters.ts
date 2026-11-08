@@ -1,13 +1,14 @@
 import type { BodyEntry, Exercise, Workout } from '../domain/types';
+import { workSecCell } from '../domain/exportData';
 
 export function toCSV(workouts: Workout[], exMap: Map<string, Exercise>): string {
-  const rows = ['date,exercise,muscle,weight,reps,sets_done,rpe,warmup'];
+  const rows = ['date,exercise,muscle,weight,reps,sets_done,rpe,warmup,work_sec'];
   for (const w of workouts) {
     for (const we of w.exercises) {
       const ex = exMap.get(we.exerciseId);
       if (!ex) continue;
       for (const s of we.sets) {
-        rows.push([w.date, `"${ex.name.replace(/"/g, '""')}"`, ex.muscle, s.weight, s.reps, s.done ? 1 : 0, s.rpe ?? '', s.warmup ? 1 : 0].join(','));
+        rows.push([w.date, `"${ex.name.replace(/"/g, '""')}"`, ex.muscle, s.weight, s.reps, s.done ? 1 : 0, s.rpe ?? '', s.warmup ? 1 : 0, workSecCell(s.workSec)].join(','));
       }
     }
   }

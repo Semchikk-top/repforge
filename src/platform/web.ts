@@ -1,9 +1,33 @@
 import type {
   BackupStoreApi, ScannerApi, FilesApi, GeoApi, GeoErrorKind, HapticsApi, HeartRateApi, LifecycleApi, NotificationsApi, NotifyOptions, NotifyPermission,
-  Platform, SecureStorageApi, WakeLockApi
+  Platform, SecureStorageApi, SpeechApi, WakeLockApi
 } from './types';
 
 // Реализация для браузера и PWA: ровно те вызовы, которые раньше были разбросаны по приложению.
+
+/** Web Speech: onend бывает не приходит (особенно в фоне), поэтому ожидание ограничено по длине текста. */
+export const webSpeech: SpeechApi = {
+  background: false,
+  get available() { return typeof window !== 'undefined' && 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined'; },
+  speak(text, lang = 'ru-RU') {
+    if (!this.available) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      let done = false;
+      const end = () => { if (!done) { done = true; clearTimeout(timer); resolve(); } };
+      const timer = setTimeout(end, 3000 + text.length * 120);
+      try {
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = lang;
+        u.onend = end; u.onerror = end;
+        window.speechSynthesis.speak(u);
+      } catch { end(); }
+    });
+  },
+  async stop() { try { window.speechSynthesis?.cancel(); } catch { /* необязательно */ } }
+};
+
+/** Ничего не умеет: для платформ без озвучки и для тестов. */
+export const stubSpeech: SpeechApi = { available: false, background: false, speak: async () => {}, stop: async () => {} };
 
 export const webGeo: GeoApi = {
   background: false,
@@ -141,6 +165,6 @@ export function createWebPlatform(version: string): Platform {
   return {
     info: { native: false, os: 'web', version },
     geo: webGeo, notifications: webNotifications, wakeLock: webWakeLock, haptics: webHaptics,
-    lifecycle: webLifecycle, secureStorage: webSecureStorage, files: webFiles, heartRate: webHeartRate, backups: webBackups, scanner: webScanner
+    lifecycle: webLifecycle, secureStorage: webSecureStorage, files: webFiles, heartRate: webHeartRate, backups: webBackups, scanner: webScanner, speech: webSpeech
   };
 }

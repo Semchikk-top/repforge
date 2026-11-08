@@ -3,7 +3,7 @@
 // Совет всегда один главный (кнопка) и, при необходимости, один запасной. Порядок правил важен: сверху то, что уже в движении.
 import type { Workout } from './types';
 import type { ReadinessLevel } from './checkin';
-import { workoutSetsCount, workoutVolume } from './analytics';
+import { dayStat, daySummaryText, workoutSetsCount } from './analytics';
 import { parseDate } from '../lib';
 
 export type TodayAction =
@@ -149,13 +149,16 @@ export function todayAdvice(i: TodayInput): TodayAdvice {
   const upcoming = live.filter((w) => w.status === 'planned' && w.date > today).sort(byDateAsc);
   if (doneToday.length) {
     const w = doneToday[0];
-    const sets = workoutSetsCount(w);
-    const vol = Math.round(workoutVolume(w));
+    const day = dayStat(doneToday, today);
     const next = upcoming[0];
+    const tail = next ? `Следующая — ${dayWord(next.date, today)}: ${next.title}.` : 'Дальше отдых. Следующую пока не запланировал.';
+    // одна тренировка: прежний текст; несколько: сводка по всему дню (количество, подходы, тоннаж, суммарное время)
+    let summary = '';
+    if (day && doneToday.length > 1) summary = daySummaryText(day);
+    else if (day && day.sets > 0) summary = `${setWord(day.sets)}${day.volumeKg ? `, ${Math.round(day.volumeKg)} кг суммарно` : ''}`;
     return {
-      kind: 'done', headline: 'Сегодняшняя тренировка выполнена',
-      detail: `${w.title}${sets ? `: ${setWord(sets)}${vol ? `, ${vol} кг суммарно` : ''}` : ''}. ` +
-        (next ? `Следующая — ${dayWord(next.date, today)}: ${next.title}.` : 'Дальше отдых. Следующую пока не запланировал.'),
+      kind: 'done', headline: doneToday.length > 1 ? 'Сегодняшние тренировки выполнены' : 'Сегодняшняя тренировка выполнена',
+      detail: `${doneToday.length > 1 ? 'За день' : w.title}${summary ? `: ${summary}` : ''}. ${tail}`,
       primary: next ? { label: 'Что дальше', action: { type: 'open', workoutId: next.id } } : undefined
     };
   }

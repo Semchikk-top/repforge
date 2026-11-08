@@ -132,6 +132,7 @@ def test_sync_response_has_versions_and_server_time(env):
     a = pair(client, conn)
     r = client.post("/api/sync", json={"since": 0, "protocol": 1, "entities": []}, headers=a).json()
     assert r["protocol"] >= 1 and r["minClientProtocol"] >= 1 and r["schema"] >= 1
+    assert r["serverVersion"] == "1.2.0"  # клиент по нему предупреждает, что сервер старее приложения
     assert abs(r["serverTime"] - __import__("time").time() * 1000) < 5000
 
 

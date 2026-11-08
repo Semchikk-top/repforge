@@ -21,6 +21,7 @@ export function StartSheet({ date, mode, onClose }: { date: string; mode: StartM
       date,
       status,
       title: t?.title ?? 'Тренировка',
+      templateId: t?.id,
       startedAt: status === 'active' ? Date.now() : undefined,
       exercises: t ? exercisesFromTemplate(t, history, exMap) : []
     });

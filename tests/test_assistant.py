@@ -93,6 +93,30 @@ def o_tool(id, name, args):
     ) + b"data: [DONE]\n\n"
 
 
+def nd(*events: dict) -> bytes:
+    """Нативный поток Ollama: по одному JSON на строку."""
+    return "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in events).encode()
+
+
+def n_text(*chunks, reason="stop", thinking=None):
+    ev = []
+    if thinking:
+        ev += [{"message": {"role": "assistant", "content": "", "thinking": t}, "done": False} for t in thinking]
+    ev += [{"message": {"role": "assistant", "content": c}, "done": False} for c in chunks]
+    return nd(*ev, {"message": {"role": "assistant", "content": ""}, "done": True, "done_reason": reason})
+
+
+def n_tool(name, args, reason="stop"):
+    return nd(
+        {"message": {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": name, "arguments": args}}]}, "done": False},
+        {"message": {"role": "assistant", "content": ""}, "done": True, "done_reason": reason},
+    )
+
+
+def nok(content):
+    return httpx.Response(200, headers={"content-type": "application/x-ndjson"}, content=content)
+
+
 def install(app, handler):
     app.state.client_factory = lambda: httpx.AsyncClient(transport=httpx.MockTransport(handler))
 
@@ -209,7 +233,7 @@ def test_provider_errors_are_reported(env):
 
 # ---------- локальная модель (OpenAI-совместимый формат, как у Ollama) ----------
 
-def test_local_openai_tool_loop(env):
+def test_local_native_tool_loop(env):
     app, client, h = env
     calls = []
 
@@ -217,22 +241,133 @@ def test_local_openai_tool_loop(env):
         body = json.loads(req.content)
         calls.append((str(req.url), body))
         if len(calls) == 1:
-            return ok(o_tool("call_7", "get_exercise_history", {"exercise": "жим лежа"}))
+            return nok(n_tool("get_exercise_history", {"exercise": "жим лежа"}))
         tool_msg = body["messages"][-1]
-        assert tool_msg["role"] == "tool" and tool_msg["tool_call_id"] == "call_7"
+        assert tool_msg["role"] == "tool" and tool_msg["tool_name"] == "get_exercise_history"
         data = json.loads(tool_msg["content"])
         assert data["results"][0]["exercise"] == "Жим штанги лёжа"  # ё/е не мешает поиску
         assert data["results"][0]["sessions"][0]["best_e1rm"] == round(max(82.5 * (1 + 8 / 30), 85 * (1 + 5 / 30)), 1)
         asst = body["messages"][-2]
-        assert asst["role"] == "assistant" and json.loads(asst["tool_calls"][0]["function"]["arguments"]) == {"exercise": "жим лежа"}
-        return ok(o_text("Прогресс ", "есть."))
+        assert asst["role"] == "assistant" and asst["tool_calls"][0]["function"] == {"name": "get_exercise_history", "arguments": {"exercise": "жим лежа"}}
+        return nok(n_text("Прогресс ", "есть."))
 
     install(app, handler)
     ev = chat(client, h, backend="local", text="Как мой жим?")
-    assert calls[0][0] == "http://127.0.0.1:11434/v1/chat/completions"
-    assert calls[0][1]["model"] == "qwen-test" and calls[0][1]["messages"][0]["role"] == "system"
-    assert calls[0][1]["tools"][0]["type"] == "function"
+    url, first = calls[0]
+    assert url == "http://127.0.0.1:11434/api/chat"
+    assert first["model"] == "qwen-test" and first["messages"][0]["role"] == "system" and first["stream"] is True
+    assert first["think"] is False and first["options"] == {"num_ctx": 16384, "num_predict": 1500}
+    assert first["tools"][0]["type"] == "function"
     assert text_of(ev) == "Прогресс есть." and ev[-1]["type"] == "done"
+    assert not [e for e in ev if e["type"] == "notice"]
+
+
+def test_local_ignores_thinking_and_empty_content_chunks(env):
+    app, client, h = env
+    install(app, lambda req: nok(n_text("Ответ ", "готов.", thinking=["Надо подумать… ", "Ещё думаю…"])))
+    ev = chat(client, h, backend="local")
+    assert text_of(ev) == "Ответ готов." and "думаю" not in text_of(ev)
+    assert ev[-1]["type"] == "done" and not [e for e in ev if e["type"] == "notice"]
+
+
+def test_local_length_truncation_shows_notice(env):
+    app, client, h = env
+    install(app, lambda req: nok(n_text("Неделя прошла ", "неплохо, но", reason="length")))
+    ev = chat(client, h, backend="local", text="Проанализируй мою неделю")
+    assert text_of(ev) == "Неделя прошла неплохо, но"
+    notices = [e["text"] for e in ev if e["type"] == "notice"]
+    assert len(notices) == 1 and "обрезан" in notices[0] and ev[-1]["type"] == "done"
+
+
+def test_local_length_with_no_text_never_leaves_empty_bubble(env):
+    app, client, h = env
+    install(app, lambda req: nok(n_text(reason="length", thinking=["думаю " * 50])))
+    ev = chat(client, h, backend="local")
+    assert text_of(ev) == ""
+    notices = [e["text"] for e in ev if e["type"] == "notice"]
+    assert len(notices) == 1 and "лимит" in notices[0] and ev[-1]["type"] == "done"
+
+
+def test_local_empty_reply_gets_explanation(env):
+    app, client, h = env
+    install(app, lambda req: nok(n_text()))
+    ev = chat(client, h, backend="local")
+    assert text_of(ev) == "" and any(e["type"] == "notice" and "пустой" in e["text"] for e in ev)
+
+
+def test_local_strips_inline_think_tags_even_when_split(env):
+    app, client, h = env
+    install(app, lambda req: nok(n_text("<thi", "nk>секретные мысли</th", "ink>Готово", ": 3 тренировки.")))
+    ev = chat(client, h, backend="local")
+    assert text_of(ev) == "Готово: 3 тренировки."
+
+
+def test_local_mid_stream_error_is_reported(env):
+    app, client, h = env
+    install(app, lambda req: nok(nd({"message": {"content": "Нач"}, "done": False}, {"error": "model runner has unexpectedly stopped"})))
+    ev = chat(client, h, backend="local")
+    assert ev[-1]["type"] == "error" and "unexpectedly" in ev[-1]["message"]
+
+
+def test_local_retries_without_think_when_model_rejects_it(env):
+    app, client, h = env
+    seen = []
+
+    def handler(req: httpx.Request):
+        body = json.loads(req.content)
+        seen.append("think" in body)
+        if "think" in body:
+            return httpx.Response(400, json={"error": "\"qwen-test\" does not support think"})
+        return nok(n_text("Ок."))
+
+    install(app, handler)
+    ev = chat(client, h, backend="local")
+    assert seen == [True, False] and text_of(ev) == "Ок."
+
+
+def test_local_custom_url_without_v1_suffix(env):
+    app, client, h = env
+    client.put("/api/assistant/config", headers=h, json={"local": {"url": "http://127.0.0.1:11500"}})
+    urls = []
+
+    def handler(req: httpx.Request):
+        urls.append(str(req.url))
+        return nok(n_text("Ок."))
+
+    install(app, handler)
+    chat(client, h, backend="local")
+    assert urls == ["http://127.0.0.1:11500/api/chat"]
+
+
+# ---------- агент (OpenAI-совместимый адаптер остаётся прежним) ----------
+
+def test_agent_uses_openai_adapter_not_native_ollama(env):
+    app, client, h = env
+    client.put("/api/assistant/config", headers=h, json={"agent": {"url": "http://127.0.0.1:8080/v1", "model": "my-agent"}})
+    calls = []
+
+    def handler(req: httpx.Request):
+        body = json.loads(req.content)
+        calls.append((str(req.url), body))
+        if len(calls) == 1:
+            return ok(o_tool("call_1", "get_personal_records", {}))
+        assert body["messages"][-1]["role"] == "tool" and body["messages"][-1]["tool_call_id"] == "call_1"
+        return ok(o_text("Рекорд ", "один."))
+
+    install(app, handler)
+    ev = chat(client, h, backend="agent", text="Мои рекорды?")
+    assert calls[0][0] == "http://127.0.0.1:8080/v1/chat/completions"
+    assert "think" not in calls[0][1] and "options" not in calls[0][1] and calls[0][1]["max_tokens"] == 1500
+    assert text_of(ev) == "Рекорд один." and ev[-1]["type"] == "done"
+
+
+def test_openai_length_finish_reports_truncation(env):
+    app, client, h = env
+    client.put("/api/assistant/config", headers=h, json={"agent": {"url": "http://127.0.0.1:8080/v1", "model": "my-agent"}})
+    body = sse({"choices": [{"delta": {"content": "Обрыв"}}]}, {"choices": [{"delta": {}, "finish_reason": "length"}]}) + b"data: [DONE]\n\n"
+    install(app, lambda req: ok(body))
+    ev = chat(client, h, backend="agent")
+    assert text_of(ev) == "Обрыв" and any(e["type"] == "notice" and "обрезан" in e["text"] for e in ev)
 
 
 def test_model_without_tool_support_falls_back(env):
@@ -244,7 +379,7 @@ def test_model_without_tool_support_falls_back(env):
         seen.append("tools" in body)
         if "tools" in body:
             return httpx.Response(400, json={"error": {"message": "registry.ollama.ai/library/gemma does not support tools"}})
-        return ok(o_text("Отвечаю без данных."))
+        return nok(n_text("Отвечаю без данных."))
 
     install(app, handler)
     ev = chat(client, h, backend="local")
@@ -259,8 +394,8 @@ def test_local_model_autodetect_and_unavailable(env, monkeypatch):
     def handler(req: httpx.Request):
         if req.url.path == "/api/tags":
             return httpx.Response(200, json={"models": [{"name": "llama3.2:3b"}]})
-        assert json.loads(req.content)["model"] == "llama3.2:3b"
-        return ok(o_text("ок"))
+        assert req.url.path == "/api/chat" and json.loads(req.content)["model"] == "llama3.2:3b"
+        return nok(n_text("ок"))
 
     install(app, handler)
     assert text_of(chat(client, h, backend="local")) == "ок"

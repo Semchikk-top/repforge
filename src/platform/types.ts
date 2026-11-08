@@ -109,6 +109,16 @@ export interface ScannerApi {
   scanQr(): Promise<string | null>;
 }
 
+export interface SpeechApi {
+  /** Есть ли озвучка (в браузере — Web Speech, в оболочке — системный TTS). Без неё подсказки просто молчат. */
+  readonly available: boolean;
+  /** true — речь слышна и при погашенном экране и свёрнутом приложении (нативный TTS). В браузере в фоне она может замолкать. */
+  readonly background: boolean;
+  /** Произносит текст; промис завершается, когда договорил, оборвали или случилась ошибка (ошибки не пробрасываются). */
+  speak(text: string, lang?: string): Promise<void>;
+  stop(): Promise<void>;
+}
+
 export interface AppInfo { native: boolean; os: 'android' | 'ios' | 'web'; version: string }
 
 export interface Platform {
@@ -123,4 +133,5 @@ export interface Platform {
   heartRate: HeartRateApi;
   backups: BackupStoreApi;
   scanner: ScannerApi;
+  speech: SpeechApi;
 }

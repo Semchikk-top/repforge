@@ -4,6 +4,8 @@ import { db } from '../db/db';
 import { putExercise, softDelete, getDeviceId } from '../db/repo';
 import { MUSCLE_LABELS, type Exercise, type MuscleGroup } from '../domain/types';
 import { uid } from '../lib';
+import { fieldToRest, formatRest, REST_PRESETS, restToField } from '../domain/rest';
+import { useSettings } from '../state/settings';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 
@@ -37,7 +39,7 @@ export function ExercisesView() {
           <button key={e.id} className="row" onClick={() => setEdit(e)}>
             <div className="grow">
               <div className="title">{e.name}</div>
-              <div className="meta">{MUSCLE_LABELS[e.muscle]} · {e.equipment}{e.restSec ? ` · отдых ${e.restSec} с` : ''}</div>
+              <div className="meta">{MUSCLE_LABELS[e.muscle]} · {e.equipment}{e.restSec ? ` · отдых ${formatRest(e.restSec)}` : ''}</div>
             </div>
           </button>
         ))}
@@ -50,21 +52,21 @@ export function ExercisesView() {
 
 function ExerciseSheet({ exercise, onClose }: { exercise: Exercise | null; onClose: () => void }) {
   const toast = useToast();
+  const { settings } = useSettings();
   const [name, setName] = useState(exercise?.name ?? '');
   const [muscle, setMuscle] = useState<MuscleGroup>(exercise?.muscle ?? 'chest');
   const [equipment, setEquipment] = useState(exercise?.equipment ?? '');
-  const [rest, setRest] = useState(exercise?.restSec ? String(exercise.restSec) : '');
+  const [rest, setRest] = useState(restToField(exercise?.restSec)); // '' — как в настройках
   const [note, setNote] = useState(exercise?.note ?? '');
 
   const save = async () => {
-    const restSec = parseInt(rest, 10);
     const base = exercise ?? { id: uid(), createdAt: Date.now(), custom: true };
     await putExercise({
       ...(base as Exercise),
       name: name.trim(),
       muscle,
       equipment: equipment.trim() || 'Свой вес',
-      restSec: Number.isFinite(restSec) && restSec > 0 ? restSec : undefined,
+      restSec: fieldToRest(rest),
       note: note.trim() || undefined,
       deviceId: await getDeviceId()
     });
@@ -90,7 +92,15 @@ function ExerciseSheet({ exercise, onClose }: { exercise: Exercise | null; onClo
         </select>
       </div>
       <div className="field"><label htmlFor="ex-eq">Оборудование</label><input id="ex-eq" className="input" value={equipment} onChange={(e) => setEquipment(e.target.value)} placeholder="Штанга, гантели, тренажёр…" /></div>
-      <div className="field"><label htmlFor="ex-rest">Отдых между подходами, с (пусто — по умолчанию)</label><input id="ex-rest" className="input" inputMode="numeric" value={rest} onChange={(e) => setRest(e.target.value)} /></div>
+      <div className="field">
+        <label htmlFor="ex-rest">Отдых между подходами</label>
+        <select id="ex-rest" className="input" value={rest} onChange={(e) => setRest(e.target.value)}>
+          <option value="">Как в настройках ({formatRest(settings.defaultRestSec)})</option>
+          {(REST_PRESETS as readonly number[]).map((v) => <option key={v} value={String(v)}>{formatRest(v)}</option>)}
+          {rest !== '' && !(REST_PRESETS as readonly number[]).includes(Number(rest)) && <option value={rest}>{formatRest(Number(rest))} (своё значение)</option>}
+        </select>
+        <span className="sub">Таймер отдыха в тренировке берёт это значение, а без него общую настройку.</span>
+      </div>
       <div className="field"><label htmlFor="ex-note">Заметка о технике</label><textarea id="ex-note" className="input" value={note} onChange={(e) => setNote(e.target.value)} /></div>
       <button className="btn primary block" disabled={!name.trim()} onClick={save}>Сохранить</button>
       {exercise && <button className="btn danger ghost block" style={{ marginTop: 10 }} onClick={remove}>Удалить упражнение</button>}

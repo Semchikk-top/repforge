@@ -1,5 +1,5 @@
 // Достижения: каталог и расчёт прогресса. Чистые функции.
-import { doneSets, finished, workoutVolume } from '../domain/analytics';
+import { doneSets, finished, sessionDurationMs, workoutVolume } from '../domain/analytics';
 import { sportOf, type Exercise, type Workout } from '../domain/types';
 import { addDays, parseDate, toDateStr, weekStart } from '../lib';
 
@@ -10,20 +10,20 @@ export const TIER_LABELS: Record<Tier, string> = { bronze: 'Бронза', silve
 export const EX = { bench: 'seed-001', pullups: 'seed-005', deadlift: 'seed-010', squat: 'seed-011' } as const;
 
 export interface Stats {
-  workouts: number;           // завершённые тренировки, где что-то сделано
+  workouts: number;           // тренировочные дни: дни, в которые завершена хотя бы одна тренировка с работой
   volumeKg: number;           // общий объём всех рабочих подходов
-  maxWorkoutVolume: number;
+  maxWorkoutVolume: number;   // самый большой объём за один день
   streakWeeks: number;        // самая длинная серия недель подряд
   bench: number; squat: number; deadlift: number; // самый тяжёлый рабочий подход, кг
   pullupReps: number;         // больше всего подтягиваний за подход
   runKmMax: number;           // самый длинный бег за раз
   cardioKm: number;           // всего километров (бег, ходьба, велосипед)
   exerciseKinds: number;      // сколько разных упражнений делал
-  longestMs: number;          // самая долгая тренировка
+  longestMs: number;          // самая долгая сумма тренировок за один день
   night: boolean;             // завершал тренировку с 00:00 до 04:00
   dawn: boolean;              // завершал тренировку с 04:00 до 06:00
   newYear: boolean;           // тренировался 1 января
-  doubleDay: boolean;         // две тренировки за один день
+  doubleDay: boolean;         // две тренировки за один день (проверяет именно число сессий)
   purchases: number;          // куплено предметов
 }
 
@@ -44,7 +44,9 @@ export function computeStats(all: Workout[], exercises: Exercise[], purchases = 
   const s: Stats = { workouts: 0, volumeKg: 0, maxWorkoutVolume: 0, streakWeeks: 0, bench: 0, squat: 0, deadlift: 0, pullupReps: 0, runKmMax: 0, cardioKm: 0, exerciseKinds: 0, longestMs: 0, night: false, dawn: false, newYear: false, doubleDay: false, purchases };
   const weeks = new Set<string>();
   const kinds = new Set<string>();
-  const perDay = new Map<string, number>();
+  const perDay = new Map<string, number>(); // сколько тренировок с работой в этот день
+  const dayVolume = new Map<string, number>();
+  const dayMs = new Map<string, number>();
   for (const w of finished(all).filter((x) => !x.imported)) { // перенесённая история в достижения не входит: за неё уже получено в другом приложении
     let worked = false;
     for (const { exerciseId, set } of doneSets(w)) {
@@ -67,19 +69,22 @@ export function computeStats(all: Workout[], exercises: Exercise[], purchases = 
       if ((ex ? sportOf(ex) : 'run') === 'run') s.runKmMax = Math.max(s.runKmMax, km);
     }
     if (!worked) continue;
-    s.workouts++;
     const v = workoutVolume(w);
     s.volumeKg += v;
-    s.maxWorkoutVolume = Math.max(s.maxWorkoutVolume, v);
+    dayVolume.set(w.date, (dayVolume.get(w.date) ?? 0) + v);
     weeks.add(toDateStr(weekStart(parseDate(w.date))));
     perDay.set(w.date, (perDay.get(w.date) ?? 0) + 1);
     if (w.date.endsWith('-01-01')) s.newYear = true;
     if (w.finishedAt) {
       const h = new Date(w.finishedAt).getHours();
       if (h < 4) s.night = true; else if (h < 6) s.dawn = true;
-      if (w.startedAt && w.finishedAt > w.startedAt && w.finishedAt - w.startedAt < 24 * 3600_000) s.longestMs = Math.max(s.longestMs, w.finishedAt - w.startedAt);
     }
+    const dur = sessionDurationMs(w);
+    if (dur !== null) dayMs.set(w.date, (dayMs.get(w.date) ?? 0) + dur);
   }
+  s.workouts = perDay.size;
+  s.maxWorkoutVolume = Math.max(0, ...dayVolume.values());
+  s.longestMs = Math.max(0, ...dayMs.values());
   s.streakWeeks = longestStreak(weeks);
   s.exerciseKinds = kinds.size;
   s.doubleDay = [...perDay.values()].some((n) => n >= 2);
@@ -103,10 +108,10 @@ const WORKOUTS = 'Тренировки', STRENGTH = 'Сила', VOLUME = 'Объ
 
 export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'first', title: 'Первый шаг', desc: 'Завершить первую тренировку', tier: 'bronze', reward: 20, glyph: 'dumbbell', group: WORKOUTS, measure: (s) => m(s.workouts, 1) },
-  { id: 'w10', title: 'Втянулся', desc: '10 тренировок', tier: 'bronze', reward: 50, glyph: 'dumbbell', group: WORKOUTS, measure: (s) => m(s.workouts, 10), unit: 'тр.' },
-  { id: 'w50', title: 'Постоянство', desc: '50 тренировок', tier: 'silver', reward: 150, glyph: 'calendar', group: WORKOUTS, measure: (s) => m(s.workouts, 50), unit: 'тр.' },
-  { id: 'w100', title: 'Сотка', desc: '100 тренировок', tier: 'gold', reward: 400, glyph: 'trophy', group: WORKOUTS, measure: (s) => m(s.workouts, 100), unit: 'тр.' },
-  { id: 'w300', title: 'Зал как дом', desc: '300 тренировок', tier: 'epic', reward: 1000, glyph: 'crown', group: WORKOUTS, measure: (s) => m(s.workouts, 300), unit: 'тр.' },
+  { id: 'w10', title: 'Втянулся', desc: '10 тренировочных дней', tier: 'bronze', reward: 50, glyph: 'dumbbell', group: WORKOUTS, measure: (s) => m(s.workouts, 10), unit: 'тр.' },
+  { id: 'w50', title: 'Постоянство', desc: '50 тренировочных дней', tier: 'silver', reward: 150, glyph: 'calendar', group: WORKOUTS, measure: (s) => m(s.workouts, 50), unit: 'тр.' },
+  { id: 'w100', title: 'Сотка', desc: '100 тренировочных дней', tier: 'gold', reward: 400, glyph: 'trophy', group: WORKOUTS, measure: (s) => m(s.workouts, 100), unit: 'тр.' },
+  { id: 'w300', title: 'Зал как дом', desc: '300 тренировочных дней', tier: 'epic', reward: 1000, glyph: 'crown', group: WORKOUTS, measure: (s) => m(s.workouts, 300), unit: 'тр.' },
   { id: 'streak4', title: 'Месяц без пропусков', desc: '4 недели подряд с тренировками', tier: 'silver', reward: 100, glyph: 'flame', group: WORKOUTS, measure: (s) => m(s.streakWeeks, 4), unit: 'нед.' },
   { id: 'streak12', title: 'Квартал в строю', desc: '12 недель подряд', tier: 'gold', reward: 300, glyph: 'flame', group: WORKOUTS, measure: (s) => m(s.streakWeeks, 12), unit: 'нед.' },
   { id: 'streak26', title: 'Полгода без пауз', desc: '26 недель подряд', tier: 'epic', reward: 800, glyph: 'flame', group: WORKOUTS, measure: (s) => m(s.streakWeeks, 26), unit: 'нед.' },
@@ -125,7 +130,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   { id: 'vol10', title: 'Десять тонн', desc: 'Поднять суммарно 10 т', tier: 'bronze', reward: 60, glyph: 'layers', group: VOLUME, measure: (s) => m(s.volumeKg, 10_000), unit: 'кг' },
   { id: 'vol100', title: 'Сто тонн', desc: 'Поднять суммарно 100 т', tier: 'silver', reward: 200, glyph: 'layers', group: VOLUME, measure: (s) => m(s.volumeKg, 100_000), unit: 'кг' },
   { id: 'vol1000', title: 'Тысяча тонн', desc: 'Поднять суммарно 1000 т', tier: 'gold', reward: 600, glyph: 'layers', group: VOLUME, measure: (s) => m(s.volumeKg, 1_000_000), unit: 'кг' },
-  { id: 'day10', title: 'Тяжёлый день', desc: '10 т за одну тренировку', tier: 'silver', reward: 120, glyph: 'bolt', group: VOLUME, measure: (s) => m(s.maxWorkoutVolume, 10_000), unit: 'кг' },
+  { id: 'day10', title: 'Тяжёлый день', desc: '10 т за один день', tier: 'silver', reward: 120, glyph: 'bolt', group: VOLUME, measure: (s) => m(s.maxWorkoutVolume, 10_000), unit: 'кг' },
 
   { id: 'run5', title: 'Пятёрка', desc: 'Пробежать 5 км за раз', tier: 'bronze', reward: 80, glyph: 'pulse', group: CARDIO, measure: (s) => m(s.runKmMax, 5), unit: 'км' },
   { id: 'run10', title: 'Десятка', desc: 'Пробежать 10 км за раз', tier: 'silver', reward: 160, glyph: 'pulse', group: CARDIO, measure: (s) => m(s.runKmMax, 10), unit: 'км' },
@@ -135,7 +140,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
 
   { id: 'kinds10', title: 'Разносторонний', desc: '10 разных упражнений', tier: 'bronze', reward: 60, glyph: 'star', group: MISC, measure: (s) => m(s.exerciseKinds, 10), unit: 'упр.' },
   { id: 'kinds25', title: 'Энциклопедия', desc: '25 разных упражнений', tier: 'silver', reward: 200, glyph: 'star', group: MISC, measure: (s) => m(s.exerciseKinds, 25), unit: 'упр.' },
-  { id: 'long2h', title: 'Марафонец зала', desc: 'Тренировка дольше двух часов', tier: 'silver', reward: 80, glyph: 'sun', group: MISC, measure: (s) => m(s.longestMs / 3600_000, 2), unit: 'ч' },
+  { id: 'long2h', title: 'Марафонец зала', desc: 'Больше двух часов тренировок за день', tier: 'silver', reward: 80, glyph: 'sun', group: MISC, measure: (s) => m(s.longestMs / 3600_000, 2), unit: 'ч' },
 
   // секретные: описание скрыто, пока не получены
   { id: 'dev', title: 'Разработчик', desc: 'Вы знаете, где у приложения двойное дно', tier: 'epic', reward: 500, glyph: 'code', group: SECRET, secret: true, manual: true },

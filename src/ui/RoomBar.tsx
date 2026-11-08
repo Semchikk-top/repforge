@@ -1,4 +1,5 @@
 import { useRestTimer } from '../state/timer';
+import { useCleanupGate } from '../state/cleanupGate';
 import { describePresence } from '../nearby/presence';
 import { REASON_TEXT, room } from '../nearby/room';
 import { newMessages, useNow, useRoom } from '../nearby/useRoom';
@@ -10,6 +11,7 @@ export function RoomBar() {
   const s = useRoom();
   const { openSheet, open } = useRoomUi();
   const timer = useRestTimer();
+  const cleanup = useCleanupGate();
   const live = s.phase === 'active' && s.remote?.p.phase === 'resting';
   const now = useNow(live);
   if (s.phase === 'idle' || open) return null;
@@ -32,7 +34,7 @@ export function RoomBar() {
   } else text = 'соединяемся…';
 
   return (
-    <div className={'room-bar' + (timer.active ? ' with-timer' : '') + (alert ? ' alert' : '')} role="status">
+    <div className={'room-bar' + (timer.active || cleanup.gate ? ' with-timer' : '') + (alert ? ' alert' : '')} role="status">
       <button className="room-bar-main" onClick={openSheet} aria-label="Открыть комнату «Рядом»">
         <IconNearby size={20} />
         <span className="room-bar-text"><b>Рядом</b> · {text}</span>

@@ -22,6 +22,8 @@ DB_PATH = DATA_DIR / "workout.db"
 ALLOWED_TABLES = {"exercises", "workouts", "templates", "tracks", "body", "programs", "profile", "game", "checkins"}
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # без похожих символов
 CODE_TTL_SEC = 10 * 60
+# Сколько отозванное устройство остаётся в списке и доступно для восстановления; потом карточка исчезает.
+REVOKED_VISIBLE_SEC = 24 * 3600
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS devices (
@@ -275,6 +277,52 @@ def device_by_token(conn: sqlite3.Connection, token: str) -> sqlite3.Row | None:
     if row:
         conn.execute("UPDATE devices SET last_seen = ? WHERE id = ?", (int(time.time()), row["id"]))
     return row
+
+
+# ---------- отзыв и восстановление устройств ----------
+# В колонке revoked лежит время отзыва в секундах (схема не менялась). Значение 1 осталось от прежних версий:
+# время отзыва тогда не записывалось, и его заменяет последний визит устройства (после отзыва он не обновляется).
+
+def revoked_at(row: sqlite3.Row) -> int | None:
+    """Когда устройство отозвано (секунды); None, если оно не отозвано."""
+    r = int(row["revoked"] or 0)
+    if r == 0:
+        return None
+    return r if r > 1 else int(row["last_seen"] or row["created_at"] or 0)
+
+
+def revoke_device(conn: sqlite3.Connection, device_id: str, now: int | None = None) -> bool:
+    """Отзывает устройство. Повторный отзыв время не сдвигает. False, если такого устройства нет."""
+    t = int(now if now is not None else time.time())
+    conn.execute("UPDATE devices SET revoked = ? WHERE id = ? AND revoked = 0", (max(t, 2), device_id))
+    return conn.execute("SELECT 1 FROM devices WHERE id = ?", (device_id,)).fetchone() is not None
+
+
+def restore_device(conn: sqlite3.Connection, device_id: str, now: int | None = None) -> str:
+    """Возвращает отозванное устройство: его прежний токен снова работает. Результат: ok | not_found | not_revoked | expired."""
+    t = int(now if now is not None else time.time())
+    with tx(conn):
+        row = conn.execute("SELECT * FROM devices WHERE id = ?", (device_id,)).fetchone()
+        if not row:
+            return "not_found"
+        at = revoked_at(row)
+        if at is None:
+            return "not_revoked"
+        if t - at > REVOKED_VISIBLE_SEC:
+            return "expired"
+        conn.execute("UPDATE devices SET revoked = 0 WHERE id = ?", (device_id,))
+    return "ok"
+
+
+def purge_expired_devices(conn: sqlite3.Connection, now: int | None = None) -> int:
+    """Удаляет устройства, отозванные дольше REVOKED_VISIBLE_SEC назад: их токен уже не вернуть, карточка не нужна."""
+    t = int(now if now is not None else time.time())
+    with tx(conn):
+        rows = conn.execute("SELECT * FROM devices WHERE revoked != 0").fetchall()
+        old = [r["id"] for r in rows if t - (revoked_at(r) or 0) > REVOKED_VISIBLE_SEC]
+        for i in old:
+            conn.execute("DELETE FROM devices WHERE id = ?", (i,))
+    return len(old)
 
 
 # ---------- синхронизация ----------

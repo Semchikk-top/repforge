@@ -127,3 +127,29 @@ describe('синхронизация с сервером разных верси
     expect(getSyncStatus()).toMatchObject({ incompat: null, error: null });
   });
 });
+
+import { msgServerOlder, serverOlderThanClient } from '../../src/sync/protocol';
+
+describe('сервер старее приложения (протокол совместим)', () => {
+  it('сравнивает числами, а не строками', () => {
+    expect(serverOlderThanClient('1.1.0', '1.2.0')).toBe(true);
+    expect(serverOlderThanClient('1.9.0', '1.10.0')).toBe(true);
+    expect(serverOlderThanClient('0.11.3', '1.0.0')).toBe(true);
+  });
+  it('равные и более новый сервер предупреждения не дают', () => {
+    expect(serverOlderThanClient('1.2.0', '1.2.0')).toBe(false);
+    expect(serverOlderThanClient('1.2.0-beta', '1.2.0')).toBe(false);
+    expect(serverOlderThanClient('1.3.0', '1.2.0')).toBe(false);
+  });
+  it('неизвестные версии не сравниваются: ни ложных тревог, ни падений', () => {
+    expect(serverOlderThanClient(undefined, '1.2.0')).toBe(false);
+    expect(serverOlderThanClient(null, '1.2.0')).toBe(false);
+    expect(serverOlderThanClient('unknown', '1.2.0')).toBe(false);
+    expect(serverOlderThanClient('1.1.0', 'dev')).toBe(false);
+    expect(serverOlderThanClient('', '1.2.0')).toBe(false);
+  });
+  it('текст называет обе версии и говорит, что делать', () => {
+    const t = msgServerOlder('1.1.0', '1.2.0');
+    expect(t).toContain('1.1.0'); expect(t).toContain('1.2.0'); expect(t).toMatch(/обнови сервер/i);
+  });
+});

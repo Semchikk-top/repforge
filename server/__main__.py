@@ -1,4 +1,4 @@
-"""Команды: python -m server pair | devices | revoke <id> | backup | run"""
+"""Команды: python -m server pair | devices | revoke <id> | restore <id> | backup | run"""
 from __future__ import annotations
 
 import argparse
@@ -84,6 +84,8 @@ def main() -> int:
     sub.add_parser("devices", help="список устройств")
     r = sub.add_parser("revoke", help="отозвать устройство")
     r.add_argument("device_id")
+    rs = sub.add_parser("restore", help="вернуть отозванное устройство (в течение суток после отзыва)")
+    rs.add_argument("device_id")
     sub.add_parser("backup", help="сделать резервную копию сейчас")
     d = sub.add_parser("discover", help="найти опубликованные серверы в локальной сети (mDNS)")
     d.add_argument("--seconds", type=float, default=3.0)
@@ -141,8 +143,11 @@ def main() -> int:
             seen = datetime.fromtimestamp(d["last_seen"]).strftime("%Y-%m-%d %H:%M") if d["last_seen"] else "никогда"
             print(f"{d['id']}  {store.sanitize_name(d['name']):<20} {'ОТОЗВАНО' if d['revoked'] else 'активно':<9} был: {seen}")
     elif args.cmd == "revoke":
-        cur = conn.execute("UPDATE devices SET revoked = 1 WHERE id = ?", (args.device_id,))
-        print("Отозвано" if cur.rowcount else "Устройство не найдено")
+        print("Отозвано" if store.revoke_device(conn, args.device_id) else "Устройство не найдено")
+    elif args.cmd == "restore":
+        msg = {"ok": "Восстановлено", "not_found": "Устройство не найдено", "not_revoked": "Устройство не было отозвано",
+               "expired": "Прошло больше суток после отзыва: подключи устройство заново по коду"}
+        print(msg[store.restore_device(conn, args.device_id)])
     elif args.cmd == "backup":
         from .main import backup_once
 

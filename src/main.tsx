@@ -12,14 +12,24 @@ import App from './App';
 import { SettingsProvider } from './state/settings';
 import { applyTheme, storedTheme } from './state/theme';
 import { RestTimerProvider } from './state/timer';
+import { CleanupGateProvider } from './state/cleanupGate';
 import { ToastProvider } from './ui/Toast';
 import { ErrorBoundary } from './ui/ErrorBoundary';
 import { RoomProvider } from './nearby/RoomProvider';
 import { initPlatform, isNative } from './platform';
+import { snapshotBeforeMigration } from './db/premigration';
 
 async function boot() {
   // В браузере это мгновенный no-op; в Capacitor подгружается нативная реализация платформы.
   await initPlatform();
+
+  // До первого обращения к базе: если схема IndexedDB будет обновлена, сначала сохраняем снимок данных.
+  // Не получилось сохранить: миграцию без явного согласия пользователя не запускаем, данные остаются нетронутыми.
+  const snap = await snapshotBeforeMigration();
+  if (snap.status === 'failed' && !window.confirm(`Не удалось сохранить копию данных перед обновлением базы (${snap.error}).\n\nПродолжить без копии? Если отказаться, данные останутся как были, а приложение не запустится до повторной попытки.`)) {
+    document.getElementById('root')!.textContent = 'Обновление базы отменено, данные не тронуты. Перезагрузи страницу, чтобы повторить.';
+    return;
+  }
 
   // Регистрируем после window.load: установка service worker сразу скачивает precache и на первом
   // запуске конкурирует с самим приложением за канал. Офлайн-режим включится на секунду позже.
@@ -34,13 +44,15 @@ async function boot() {
     <StrictMode>
       <SettingsProvider>
         <RestTimerProvider>
-          <ToastProvider>
-            <RoomProvider>
-              <ErrorBoundary>
-                <App />
-              </ErrorBoundary>
-            </RoomProvider>
-          </ToastProvider>
+          <CleanupGateProvider>
+            <ToastProvider>
+              <RoomProvider>
+                <ErrorBoundary>
+                  <App />
+                </ErrorBoundary>
+              </RoomProvider>
+            </ToastProvider>
+          </CleanupGateProvider>
         </RestTimerProvider>
       </SettingsProvider>
     </StrictMode>

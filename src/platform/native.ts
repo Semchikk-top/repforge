@@ -9,7 +9,8 @@ import { Geolocation } from '@capacitor/geolocation';
 import { KeepAwake } from '@capacitor-community/keep-awake';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Share } from '@capacitor/share';
-import type { ScannerApi, BackupStoreApi, ExactAlarmState, FilesApi, HeartRateApi, SecureStorageApi, GeoApi, GeoWatchOptions, LifecycleApi, NotificationsApi, NotifyOptions, NotifyPermission, Platform, WakeLockApi } from './types';
+import { TextToSpeech } from '@capacitor-community/text-to-speech';
+import type { ScannerApi, BackupStoreApi, ExactAlarmState, FilesApi, HeartRateApi, SecureStorageApi, GeoApi, GeoWatchOptions, LifecycleApi, NotificationsApi, NotifyOptions, NotifyPermission, Platform, SpeechApi, WakeLockApi } from './types';
 import { HR_MEASUREMENT_UUID, HR_SERVICE_UUID, parseHeartRate } from '../cardio/hrParse';
 import { webHaptics } from './web';
 
@@ -246,6 +247,16 @@ const backups: BackupStoreApi = {
   }
 };
 
+// Системный TTS: работает при погашенном экране, пока жива запись (foreground-сервис геолокации держит процесс).
+const speech: SpeechApi = {
+  available: true,
+  background: true,
+  async speak(text, lang = 'ru-RU') {
+    try { await TextToSpeech.speak({ text, lang, rate: 1.0, pitch: 1.0, volume: 1.0, queueStrategy: 1 }); } catch { /* нет движка или языка: озвучка необязательна */ }
+  },
+  async stop() { try { await TextToSpeech.stop(); } catch { /* необязательно */ } }
+};
+
 const scanner: ScannerApi = {
   available: true,
   async scanQr() {
@@ -273,6 +284,6 @@ export async function createNativePlatform(version: string): Promise<Platform> {
     info: { native: true, os, version },
     geo, notifications, wakeLock, lifecycle, files,
     haptics: webHaptics, // navigator.vibrate работает в WebView при разрешении VIBRATE
-    secureStorage, heartRate, backups, scanner
+    secureStorage, heartRate, backups, scanner, speech
   };
 }

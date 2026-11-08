@@ -11,8 +11,10 @@ import { confirmServer } from './sync/pairLink';
 import { platform } from './platform';
 import { useToast } from './ui/Toast';
 import { useRestTimer } from './state/timer';
+import { useCleanupGate } from './state/cleanupGate';
 import { BottomNav } from './ui/BottomNav';
 import { TimerBar } from './ui/TimerBar';
+import { CleanupBar } from './ui/CleanupBar';
 import { CalendarView } from './views/CalendarView';
 import { ExercisesView } from './views/ExercisesView';
 import { WorkoutHub } from './views/WorkoutHub';
@@ -27,6 +29,7 @@ import { RoomBar } from './ui/RoomBar';
 import { useRoom } from './nearby/useRoom';
 import { GameEffects } from './game/GameEffects';
 import { SyncNotice } from './ui/SyncNotice';
+import { WhatsNew } from './views/WhatsNew';
 
 // Редко открываемые экраны грузятся по требованию: главный чанк меньше, первый экран появляется быстрее.
 // Календарь, «Тренировка», упражнения и сама тренировка остаются в основном чанке: они нужны сразу и без сети.
@@ -62,6 +65,8 @@ export default function App() {
   const [ready, setReady] = useState(false);
   const segs = useRoute();
   const timer = useRestTimer();
+  const cleanup = useCleanupGate();
+  const barUp = timer.active || !!cleanup.gate; // внизу стоит таймер отдыха или плашка уборки: контент и кнопки поднимаются
   const toast = useToast();
   const roomPhase = useRoom().phase;
 
@@ -168,6 +173,7 @@ export default function App() {
       {ready && <PairingApproval />}
       {ready && <GameEffects />}
       {ready && <SyncNotice />}
+      <WhatsNew ready={ready} />
       {due && (
         <div className="reminder" role="status">
           <span>Сегодня по плану: <b>{due.title}</b></span>
@@ -179,14 +185,15 @@ export default function App() {
         <div key={viewKey} className={'view view-' + dirRef.current.dir}><Suspense fallback={<p className="empty">Загрузка…</p>}>{view}</Suspense></div>
       ) : (
         <>
-          <main className={'page' + (timer.active ? ' has-timer' : '') + (roomPhase !== 'idle' ? ' has-room' : '')}>
+          <main className={'page' + (barUp ? ' has-timer' : '') + (roomPhase !== 'idle' ? ' has-room' : '')}>
             <div key={viewKey} className={'view view-' + dirRef.current.dir}><Suspense fallback={<p className="empty">Загрузка…</p>}>{view}</Suspense></div>
           </main>
           {ready && showFab && (
-            <button className={'fab' + (timer.active ? ' with-timer' : '')} onClick={() => go('assistant')} aria-label="Ассистент"><IconSpark size={26} /></button>
+            <button className={'fab' + (barUp ? ' with-timer' : '')} onClick={() => go('assistant')} aria-label="Ассистент"><IconSpark size={26} /></button>
           )}
           <RoomBar />
           <TimerBar />
+          <CleanupBar />
           <BottomNav current={navTab} />
         </>
       )}

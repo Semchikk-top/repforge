@@ -2,13 +2,14 @@ import { useMemo, useState } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import {
-  averageDurationMs, bestEffortRecords, cardioSessions, currentStreakWeeks, detectPlateaus, e1rmSeries, finished, loadRatio,
+  averageDayDurationMs, bestEffortRecords, cardioSessions, currentStreakWeeks, dailyStats, detectPlateaus, e1rmSeries, finished, loadRatio,
   LOAD_PERIODS, muscleLoad, personalRecords, weeklyDistance, weeklyStats, type LoadMetric
 } from '../domain/analytics';
 import { avgPace, formatHMS, formatKm, formatPace } from '../cardio/geo';
 import { BodySection } from './BodySection';
 import { MUSCLE_LABELS, type CheckIn, type Exercise, type Workout } from '../domain/types';
 import { formatDuration, formatNum, parseDate } from '../lib';
+import { averageRestSec, averageSetSec, exerciseRestStats, exerciseTempoStats, exerciseTimeStats, formatSetTime } from '../domain/setTiming';
 import { go } from '../state/router';
 import { PhotosSection } from './PhotosSection';
 import { useSettings } from '../state/settings';
@@ -34,11 +35,7 @@ export function StatsView() {
   const streak = useMemo(() => currentStreakWeeks(workouts), [workouts]);
   const thisWeek = weeks[weeks.length - 1];
 
-  const heat = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const w of done) m[w.date] = (m[w.date] ?? 0) + 1;
-    return m;
-  }, [done]);
+  const heat = useMemo(() => Object.fromEntries(dailyStats(workouts).map((d) => [d.date, d])), [workouts]);
 
   return (
     <div>
@@ -54,14 +51,14 @@ export function StatsView() {
       ) : (
         <>
           <div className="kpis section">
-            <div className="kpi"><div className="bignum"><CountUp value={thisWeek.count} /></div><div className="sub">тренировок на этой неделе</div></div>
+            <div className="kpi"><div className="bignum"><CountUp value={thisWeek.days} /></div><div className="sub">{thisWeek.days === 1 ? 'тренировочный день' : 'тренировочных дней'} на этой неделе{thisWeek.sessions > thisWeek.days ? ` (тренировок ${thisWeek.sessions})` : ''}</div></div>
             <div className="kpi"><div className="bignum"><CountUp value={thisWeek.volume / 1000} format={(n) => formatNum(Math.round(n * 10) / 10)} /></div><div className="sub">т объём за неделю</div></div>
             <div className="kpi"><div className="bignum"><CountUp value={streak} /></div><div className="sub">{streak === 1 ? 'неделя' : 'недель'} подряд</div></div>
           </div>
 
           <div className="section">
             <h2>Активность</h2>
-            <Heatmap counts={heat} days={364} />
+            <Heatmap stats={heat} days={364} />
           </div>
 
           <div className="section">
@@ -70,8 +67,8 @@ export function StatsView() {
           </div>
 
           <div className="section">
-            <h2>Тренировок по неделям</h2>
-            <BarChart data={weeks.map((w, i) => ({ label: chartDate(w.start), value: w.count, highlight: i === weeks.length - 1 }))} />
+            <h2>Тренировочных дней по неделям</h2>
+            <BarChart data={weeks.map((w, i) => ({ label: chartDate(w.start), value: w.days, highlight: i === weeks.length - 1 }))} />
           </div>
 
           <div className="section">
@@ -98,6 +95,8 @@ export function StatsView() {
           </div>
 
           <CardioStats workouts={workouts} exMap={exMap} />
+
+          <SetTimeStats workouts={workouts} exMap={exMap} deep={deep} />
 
           <PhotosSection />
 
@@ -179,7 +178,7 @@ function MuscleLoadSection({ workouts, exMap }: { workouts: Workout[]; exMap: Ma
 function DeepStats({ workouts, exMap }: { workouts: Workout[]; exMap: Map<string, Exercise> }) {
   const plateaus = useMemo(() => detectPlateaus(workouts), [workouts]);
   const load = useMemo(() => loadRatio(workouts), [workouts]);
-  const dur = useMemo(() => averageDurationMs(workouts), [workouts]);
+  const dur = useMemo(() => averageDayDurationMs(workouts), [workouts]);
 
   const trained = useMemo(() => {
     const ids = new Set<string>();
@@ -222,7 +221,7 @@ function DeepStats({ workouts, exMap }: { workouts: Workout[]; exMap: Map<string
           <div className="kpi"><div className="bignum">{load.ratio === null ? '—' : load.ratio.toFixed(2)}</div><div className="sub">отношение</div></div>
         </div>
         <p className="sub" style={{ marginTop: 8 }}>{ratioText}</p>
-        {dur && <p className="sub">Средняя длительность тренировки: {formatDuration(dur)}.</p>}
+        {dur && <p className="sub">Средняя длительность тренировочного дня: {formatDuration(dur)}.</p>}
       </div>
 
       <div className="section">
@@ -284,6 +283,49 @@ function CardioStats({ workouts, exMap }: { workouts: Workout[]; exMap: Map<stri
         </div>
       )}
       <p className="sub">Лучшие отрезки считаются только по маршрутам, записанным через GPS.</p>
+    </div>
+  );
+}
+
+// Время подходов: от «Начать» или конца отдыха до галочки. Разминка не считается, подходы без времени тоже.
+function SetTimeStats({ workouts, exMap, deep }: { workouts: Workout[]; exMap: Map<string, Exercise>; deep: boolean }) {
+  const overall = useMemo(() => averageSetSec(workouts), [workouts]);
+  const perExercise = useMemo(() => exerciseTimeStats(workouts).filter((x) => exMap.has(x.exerciseId)).slice(0, 8), [workouts, exMap]);
+  const rest = useMemo(() => averageRestSec(workouts), [workouts]);
+  const restBy = useMemo(() => new Map(exerciseRestStats(workouts).map((x) => [x.exerciseId, x])), [workouts]);
+  const tempoBy = useMemo(() => new Map(exerciseTempoStats(workouts).map((x) => [x.exerciseId, x])), [workouts]);
+  if (!overall) return null;
+  return (
+    <div className="section">
+      <h2>Время подходов</h2>
+      <div className="kpis">
+        <div className="kpi"><div className="bignum">{formatSetTime(overall.avgSec)}</div><div className="sub">в среднем на подход</div></div>
+        {rest
+          ? <div className="kpi"><div className="bignum">{formatSetTime(rest.avgSec)}</div><div className="sub">отдых по таймеру</div></div>
+          : <div className="kpi"><div className="bignum">{formatNum(overall.sets)}</div><div className="sub">подходов с временем</div></div>}
+      </div>
+      {deep && perExercise.length > 0 && (
+        <div className="list" style={{ marginTop: 10 }}>
+          {perExercise.map((x) => (
+            <div key={x.exerciseId} className="row">
+              <div className="grow">
+                <div className="title">{exMap.get(x.exerciseId)!.name}</div>
+                <div className="meta">{formatNum(x.sets)} подх. в {formatNum(x.sessions)} трен.: упражнение целиком в среднем {formatSetTime(x.avgExerciseSec)}</div>
+                {(() => {
+                  const r = restBy.get(x.exerciseId), t = tempoBy.get(x.exerciseId);
+                  const parts: string[] = [];
+                  if (t) parts.push(`темп ${formatNum(Math.round(t.secPerRep * 10) / 10)} с на повторение`);
+                  if (t?.slowdownPct != null && Math.abs(t.slowdownPct) >= 10) parts.push(t.slowdownPct > 0 ? `к последнему подходу медленнее на ${Math.round(t.slowdownPct)}%` : `к последнему подходу быстрее на ${Math.round(-t.slowdownPct)}%`);
+                  if (r && r.count >= 3) parts.push(`отдых ${formatSetTime(r.avgRestSec)}`);
+                  return parts.length ? <div className="meta">{parts.join(' · ')}</div> : null;
+                })()}
+              </div>
+              <div style={{ fontFamily: 'var(--font-display)', fontSize: 22, fontWeight: 600 }}>{formatSetTime(x.avgSetSec)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <p className="sub">Время самих подходов, без отдыха. Отдых берётся по таймеру с учётом «+15 с» и «Пропустить», ожидание после его конца входит уже в подход. Нажимай «Начать» у первого подхода упражнения, остальные считаются сами.</p>
     </div>
   );
 }

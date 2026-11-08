@@ -29,6 +29,14 @@ export function formatDuration(ms: number): string {
   return `${Math.floor(min / 60)} ч ${min % 60} мин`;
 }
 
+/** Склонение по числу: pluralRu(2, 'тренировка', 'тренировки', 'тренировок'). */
+export function pluralRu(n: number, one: string, few: string, many: string): string {
+  const a = Math.abs(n) % 100, b = a % 10;
+  if (a > 10 && a < 20) return many;
+  if (b === 1) return one;
+  return b >= 2 && b <= 4 ? few : many;
+}
+
 export function formatNum(n: number): string {
   return Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, '');
 }

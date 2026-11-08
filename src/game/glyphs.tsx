@@ -26,7 +26,12 @@ const G: Record<string, ReactNode> = {
   layers: <path d="M12 4l9 5-9 5-9-5 9-5zM3 14l9 5 9-5" />,
   calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
   user: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7" /></>,
-  twin: <path d="M5 8h5M14 8h5M7.5 8v8M16.5 8v8M5 16h5M14 16h5" />
+  twin: <path d="M5 8h5M14 8h5M7.5 8v8M16.5 8v8M5 16h5M14 16h5" />,
+  rocket: <><path d="M12 3c3 2 5 5 5 9l-2 4H9l-2-4c0-4 2-7 5-9z" /><circle cx="12" cy="10" r="1.5" /><path d="M9 16l-3 3M15 16l3 3M12 17v4" /></>,
+  diamond: <path d="M6 4h12l4 6-10 11L2 10l4-6zM2 10h20M9 4l3 6 3-6M12 21l-3-11M12 21l3-11" />,
+  shield: <><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z" /><path d="M9 12l2 2 4-4" /></>,
+  snowflake: <path d="M12 2v20M3.3 7l17.4 10M3.3 17L20.7 7M9 4l3 2 3-2M9 20l3-2 3 2" />,
+  ghost: <><path d="M5 20V11a7 7 0 0 1 14 0v9l-3-2-2 2-2-2-2 2-2-2-3 2z" /><path d="M9.5 11h.01M14.5 11h.01" /></>
 };
 
 export type GlyphName = keyof typeof G;

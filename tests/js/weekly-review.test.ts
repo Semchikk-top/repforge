@@ -36,8 +36,8 @@ describe('недельный разбор', () => {
   it('итоги недели и прошлой недели считаются по выполненным рабочим подходам', () => {
     const r = weeklyReview(history, exMap, [], now);
     expect([r.weekStart, r.weekEnd]).toEqual(['2026-10-19', '2026-10-25']);
-    expect(r.totals).toEqual({ workouts: 2, sets: 7, volume: 85 * 5 * 3 + 100 * 5 * 4 });
-    expect(r.previous.workouts).toBe(1);
+    expect(r.totals).toEqual({ days: 2, sessions: 2, sets: 7, volume: 85 * 5 * 3 + 100 * 5 * 4 });
+    expect(r.previous.days).toBe(1);
   });
 
   it('рост: лучший расчётный максимум недели выше прежнего, сортировка по приросту', () => {
@@ -67,7 +67,7 @@ describe('недельный разбор', () => {
 
   it('удалённые и незавершённые тренировки не считаются', () => {
     const r = weeklyReview([...history, wk('2026-10-21', [['squat', [set(200, 5)]]], { deletedAt: 1 }), wk('2026-10-22', [['squat', [set(200, 5)]]], { status: 'active' })], exMap, [], now);
-    expect(r.totals.workouts).toBe(2);
+    expect(r.totals.days).toBe(2);
   });
 
   it('не больше двух предложений, застой идёт первым', () => {

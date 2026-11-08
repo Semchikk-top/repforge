@@ -42,6 +42,8 @@ export interface SetEntry {
   note?: string;   // техника, самочувствие
   rpe?: number;    // усилие 6–10 (10 — больше не мог бы ни одного повторения)
   warmup?: boolean; // разминка: не входит в объём, рекорды и рейтинги; не задан = рабочий подход
+  startedAt?: number; // момент нажатия «Начать» (только у первого подхода упражнения); см. domain/setTiming.ts
+  workSec?: number;   // время выполнения подхода, секунды: от начала до галочки, без отдыха
 }
 
 // Результат кардио-упражнения (бег, ходьба, велосипед). У таких упражнений sets пустой.
@@ -55,6 +57,52 @@ export interface CardioEntry {
   trackId?: ID;
   hrAvg?: number;           // средний пульс (вводится вручную), уд/мин
   hrMax?: number;           // максимальный пульс за тренировку
+  place?: CardioPlace;      // где была тренировка; у старых записей не задано (неизвестно)
+  laps?: IntervalLap[];     // отрезки интервальной тренировки, в порядке выполнения
+}
+
+// ---------- интервальные кардиотренировки ----------
+
+/** Длина отрезка: по времени (секунды) или по дистанции (метры). */
+export type IntervalLength = { by: 'time'; sec: number } | { by: 'distance'; m: number };
+/** Цель отрезка: темп (для велосипеда это скорость, внутри всегда секунды на километр) или пульсовая зона. */
+export type IntervalTarget = { kind: 'pace'; secPerKm: number } | { kind: 'zone'; zone: 1 | 2 | 3 | 4 | 5 };
+export interface IntervalPhase { length: IntervalLength; target?: IntervalTarget }
+/** Разминка, reps × (работа + отдых), заминка. Отдыха после последней работы нет. */
+export interface IntervalPlan { warmup?: IntervalLength; reps: number; work: IntervalPhase; rest?: IntervalPhase; cooldown?: IntervalLength }
+export type IntervalRole = 'warmup' | 'work' | 'rest' | 'cooldown';
+export const INTERVAL_ROLE_LABELS: Record<IntervalRole, string> = { warmup: 'Разминка', work: 'Работа', rest: 'Отдых', cooldown: 'Заминка' };
+/** Итог одного отрезка. skipped — пропущен кнопкой, partial — запись завершили посреди отрезка. */
+export interface IntervalLap { role: IntervalRole; sec: number; distanceM: number; skipped?: boolean; partial?: boolean }
+
+// Где проходит кардио: на улице (GPS, карта, навигация, голос) или в помещении (ручной ввод, дорожка)
+export type CardioPlace = 'outdoor' | 'indoor';
+export const PLACE_LABELS: Record<CardioPlace, string> = { outdoor: 'На улице', indoor: 'В помещении' };
+
+export interface LatLon { lat: number; lon: number }
+export type RouteProfile = 'pedestrian' | 'bicycle';
+
+// Манёвр построенного маршрута (по ответу Valhalla). Расстояния в метрах, время в секундах.
+export interface NavManeuver {
+  type: number;         // код манёвра Valhalla (4–6: пункт назначения)
+  instruction: string;  // текст для экрана
+  alert?: string;       // голос заранее: «Поверните налево.»
+  verbal?: string;      // голос у поворота: «Поверните налево на улицу Ленина.»
+  street?: string;
+  lengthM: number;      // длина участка после манёвра
+  timeSec: number;
+  shapeIndex: number;   // номер точки в PlannedRoute.shape, где манёвр начинается
+  via?: boolean;        // промежуточная точка маршрута, а не конец
+}
+
+// План маршрута нужен только активной тренировке: хранится в ActiveRecording, в историю (CardioEntry) не попадает.
+export interface PlannedRoute {
+  profile: RouteProfile;
+  waypoints: LatLon[];
+  shape: LatLon[];
+  distanceM: number;
+  durationSec: number;
+  maneuvers: NavManeuver[];
 }
 
 export interface WorkoutExercise {
@@ -78,6 +126,7 @@ export interface Workout extends SyncMeta {
   note?: string;
   programId?: ID;    // тренировка создана программой
   programSlot?: string; // «программа:неделя:день»: чтобы не назначать одно и то же дважды
+  templateId?: ID;  // тренировка создана из этого шаблона: после неё можно предложить сохранить новый порядок упражнений
   imported?: boolean; // перенесена из другого приложения: в аналитике и рекордах есть, опыта, монет и достижений не даёт
 }
 
@@ -137,6 +186,8 @@ export interface Settings {
   weeklyGoalKm: number;       // цель недели: километров бега и ходьбы (0 — выключено)
   privacyZoneM: number;       // сколько метров в начале и конце маршрута скрывать на экране и в GPX
   voiceCues: boolean;         // голосовые подсказки на каждом километре
+  voiceNav: boolean;          // голос навигации на улице (повороты, сход с маршрута); по умолчанию выключен: включается явно
+  voiceCoach: boolean;        // тренировочные подсказки (половина дистанции, пульсовая зона, темп); по умолчанию выключены
   barWeight: number;          // вес грифа для калькулятора блинов
   plates: number[];           // какие блины есть в зале (кг), от них считает калькулятор
   maxHr: number;              // максимальный пульс для зон; 0 — не задан
@@ -148,6 +199,7 @@ export interface Settings {
   checkinEveningEnabled: boolean; // напоминание о вечернем чек-ине
   checkinEveningTime: string;     // «HH:MM»
   weeklyReviewEnabled: boolean;   // карточка недельного разбора на календаре (считается на устройстве)
+  cleanupEnabled: boolean;    // плашка «Убери инвентарь» после последнего рабочего подхода упражнения
   autoBackup: boolean;        // автокопия раз в сутки внутри приложения (только нативная оболочка)
 }
 
@@ -162,6 +214,8 @@ export const DEFAULT_SETTINGS: Settings = {
   weeklyGoalKm: 0,
   privacyZoneM: 0,
   voiceCues: false,
+  voiceNav: false,
+  voiceCoach: false,
   barWeight: 20,
   plates: [25, 20, 15, 10, 5, 2.5, 1.25],
   maxHr: 0,
@@ -173,6 +227,7 @@ export const DEFAULT_SETTINGS: Settings = {
   checkinEveningEnabled: false,
   checkinEveningTime: '21:30',
   weeklyReviewEnabled: false,
+  cleanupEnabled: true,
   autoBackup: true
 };
 

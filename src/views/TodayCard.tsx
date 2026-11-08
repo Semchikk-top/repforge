@@ -4,13 +4,16 @@ import { db } from '../db/db';
 import { checkInId, readiness } from '../domain/checkin';
 import { shouldOfferOnboarding } from '../domain/starter';
 import { todayAdvice, type TodayAction, type TodayButton } from '../domain/today';
-import type { Workout } from '../domain/types';
+import { isCardio, type Exercise, type Workout } from '../domain/types';
+import { forecastSec, formatForecast } from '../domain/forecast';
+import { useSettings } from '../state/settings';
 import { duplicateWorkout, putWorkout } from '../db/repo';
 import { todayStr } from '../lib';
 import { go } from '../state/router';
 import { StartSheet } from '../ui/StartSheet';
 import { useToast } from '../ui/Toast';
 import { dismissOnboarding, ONBOARDING_DISMISSED } from './onboardingState';
+import { EaseCard } from './EaseCard';
 
 /** Дата, которая сама переключается в полночь: приложение могут не закрывать сутками. */
 function useToday(): string {
@@ -33,21 +36,32 @@ export function TodayCard() {
   const [busy, setBusy] = useState(false);
 
   const data = useLiveQuery(async () => {
-    const [workouts, templates, programs, dismissed, morning] = await Promise.all([
+    const [workouts, templates, programs, dismissed, morning, exercises] = await Promise.all([
       db.workouts.toArray().then((w) => w.filter((x) => !x.deletedAt)),
       db.templates.filter((t) => !t.deletedAt).count(),
       db.programs.filter((p) => !p.deletedAt).count(),
       db.kv.get(ONBOARDING_DISMISSED),
-      db.checkins.get(checkInId(today, 'morning'))
+      db.checkins.get(checkInId(today, 'morning')),
+      db.exercises.toArray()
     ]);
     return {
-      workouts, hasPlan: templates + programs > 0,
+      workouts, exercises, hasPlan: templates + programs > 0,
       onboardingOffered: shouldOfferOnboarding({ workouts: workouts.length, templates, programs }, dismissed?.value === true),
       readiness: morning && !morning.deletedAt ? readiness(morning).level : null
     };
   }, [today]);
 
   const advice = useMemo(() => (data ? todayAdvice({ today, ...data }) : null), [data, today]);
+  const { settings } = useSettings();
+  // сколько займёт (осталось) тренировка, которую совет предлагает открыть
+  const forecast = useMemo(() => {
+    const act = advice?.primary?.action;
+    if (!data || !act || act.type !== 'open') return null;
+    const w = data.workouts.find((x) => x.id === act.workoutId);
+    if (!w || w.status === 'done') return null;
+    const exMap = new Map<string, Exercise>(data.exercises.map((e) => [e.id, e]));
+    return forecastSec(w.exercises, data.workouts.filter((x) => x.id !== w.id), settings.defaultRestSec, (x) => isCardio(exMap.get(x.exerciseId)));
+  }, [advice, data, settings.defaultRestSec]);
   if (!data || !advice) return null;
 
   const run = async (action: TodayAction) => {
@@ -76,11 +90,16 @@ export function TodayCard() {
 
   const btn = (b: TodayButton, cls: string) => <button className={'btn ' + cls} disabled={busy} onClick={() => void run(b.action)}>{b.label}</button>;
 
+  // поправка по состоянию нужна только там, где совет открывает тренировку сегодняшнего дня
+  const act = advice.primary?.action;
+  const ease = act && act.type === 'open' && data.workouts.some((w) => w.id === act.workoutId && w.date === today && w.status !== 'done') ? act.workoutId : null;
+
   return (
+    <>
     <div className={`today-card k-${advice.kind}`} role="region" aria-label="Что делать сегодня">
       <div className="today-kicker">Сегодня</div>
       <h2 className="today-head">{advice.headline}</h2>
-      <p className="today-detail">{advice.detail}</p>
+      <p className="today-detail">{advice.detail}{forecast && ` Примерно ${formatForecast(forecast.sec)}.`}</p>
       {advice.steps && (
         <ol className="today-steps" aria-label="Первые шаги">
           {advice.steps.map((s) => (
@@ -99,5 +118,7 @@ export function TodayCard() {
       )}
       {sheet && <StartSheet date={today} mode="start" onClose={() => setSheet(false)} />}
     </div>
+    {ease && <EaseCard workoutId={ease} />}
+    </>
   );
 }

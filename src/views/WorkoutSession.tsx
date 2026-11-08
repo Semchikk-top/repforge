@@ -1,11 +1,19 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
-import { newTemplateFromWorkout, putWorkout, softDelete } from '../db/repo';
+import { newTemplateFromWorkout, putExercise, putTemplate, putWorkout, softDelete } from '../db/repo';
 import { lastPerformance, workoutSetsCount, workoutVolume } from '../domain/analytics';
 import { makeSet, makeWorkoutExercise } from '../domain/ops';
 import { SET_KIND_LABELS, SET_KIND_SHORT, isCardio, type CardioEntry, type Exercise, type SetEntry, type SetKind, type Workout, type WorkoutExercise } from '../domain/types';
 import { groupInfo, linkWithNext, restAfter, splitAfter } from '../domain/superset';
+import { cleanupLabel, shouldShowCleanup } from '../domain/cleanup';
+import { planAfterSet } from '../state/cleanupCore';
+import { useCleanupGate } from '../state/cleanupGate';
+import { blocksOf, insertAt, moveBlock, restoreLayout, stepBlock, templateWithWorkoutOrder } from '../domain/reorder';
+import { forecastSec, formatForecast } from '../domain/forecast';
+import { formatRest, REST_SOURCE_LABEL, resolveRest } from '../domain/rest';
+import { lastRest, restDismissKey, suggestRestChange, SUGGEST_MIN_WORKOUTS, type RestSuggestion, type WorkoutRest } from '../domain/restHints';
+import { formatSetTime, needsManualStart, resolveSetStart, workSecBetween } from '../domain/setTiming';
 import { suggestNext } from '../domain/progression';
 import { PlateSheet } from '../ui/PlateSheet';
 import { formatKm } from '../cardio/geo';
@@ -18,12 +26,14 @@ import { reconcileGame, type Reconciled } from '../game/store';
 import { Glyph } from '../game/glyphs';
 import { useWakeLock } from '../state/wakelock';
 import { ExercisePicker } from '../ui/ExercisePicker';
-import { IconBack, IconCheck, IconNearby, IconSpark, IconSwap, IconTrash } from '../ui/Icons';
+import { IconArrowDown, IconArrowUp, IconBack, IconCheck, IconGrip, IconNearby, IconSpark, IconSwap, IconTrash } from '../ui/Icons';
+import { useBlockDrag } from '../ui/useBlockDrag';
 import { swapExercise } from '../domain/swap';
 import { SwapSheet } from './SwapSheet';
 import { useRoomUi } from '../nearby/RoomProvider';
 import { useRoom } from '../nearby/useRoom';
 import { Sheet } from '../ui/Sheet';
+import { EaseCard } from './EaseCard';
 import { CountUp } from '../ui/CountUp';
 import { Stepper } from '../ui/Stepper';
 import { useToast } from '../ui/Toast';
@@ -34,15 +44,43 @@ const CardioBlock = lazy(() => import('../cardio/CardioBlock').then((m) => ({ de
 export function WorkoutSession({ id }: { id: string }) {
   const { settings } = useSettings();
   const timer = useRestTimer();
+  const cleanup = useCleanupGate();
   const toast = useToast();
   const writeQueue = useRef<Promise<unknown>>(Promise.resolve()); // очередь записи подходов
   const roomUi = useRoomUi();
   const roomPhase = useRoom().phase;
+  const dropRef = useRef<(from: number, to: number) => void>(() => {}); // подставляется ниже, когда тренировка загружена
+  const reorder = useBlockDrag((from, to) => dropRef.current(from, to));
 
   const workout = useLiveQuery(() => db.workouts.get(id), [id]);
   const history = useLiveQuery(() => db.workouts.toArray(), [], [] as Workout[]);
   const exList = useLiveQuery(() => db.exercises.toArray(), [], [] as Exercise[]);
   const exMap = useMemo(() => new Map(exList.map((e) => [e.id, e])), [exList]);
+  // прогноз: оставшиеся подходы по их среднему времени плюс отдых; пересчитывается при правках, а не каждую секунду
+  const forecast = useMemo(
+    () => (workout && workout.status !== 'done'
+      ? forecastSec(workout.exercises, history.filter((h) => h.id !== workout.id), settings.defaultRestSec, (x) => isCardio(exMap.get(x.exerciseId)), (x) => resolveRest(exMap.get(x.exerciseId), settings.defaultRestSec).sec)
+      : null),
+    [workout, history, exMap, settings.defaultRestSec]
+  );
+
+  // подсказки по отдыху: что было в прошлый раз и не пора ли изменить отдых упражнения (только предложение)
+  const dismissRows = useLiveQuery(() => db.kv.where('key').startsWith('rest.dismiss.').toArray(), [], [] as { key: string; value: unknown }[]);
+  const restInfo = useMemo(() => {
+    const m = new Map<string, { last: WorkoutRest | null; suggestion: RestSuggestion | null }>();
+    if (!workout || workout.status !== 'active') return m;
+    const dismissed = new Map(dismissRows.map((r) => [r.key, typeof r.value === 'number' ? r.value : 0]));
+    for (const we of workout.exercises) {
+      const ex = exMap.get(we.exerciseId);
+      if (!ex || isCardio(ex) || m.has(we.exerciseId)) continue;
+      const cur = resolveRest(ex, settings.defaultRestSec).sec;
+      m.set(we.exerciseId, {
+        last: lastRest(history, we.exerciseId, workout.id),
+        suggestion: suggestRestChange(history, we.exerciseId, cur, { excludeWorkoutId: workout.id, dismissedAfter: dismissed.get(restDismissKey(we.exerciseId)) })
+      });
+    }
+    return m;
+  }, [workout, history, exMap, settings.defaultRestSec, dismissRows]);
 
   const [picker, setPicker] = useState(false);
   const [swapping, setSwapping] = useState<string | null>(null); // id записи упражнения, которое заменяем
@@ -52,6 +90,10 @@ export function WorkoutSession({ id }: { id: string }) {
   const [popId, setPopId] = useState<string | null>(null);
   const [plates, setPlates] = useState<number | null>(null);
   const [openSet, setOpenSet] = useState<string | null>(null);
+
+  // плашка уборки живёт только на экране тренировки: ушли с экрана — молча закрываем
+  const dismissCleanup = cleanup.dismiss;
+  useEffect(() => dismissCleanup, [dismissCleanup]);
 
   const isActive = workout?.status === 'active';
   useWakeLock(!!isActive && settings.keepAwake);
@@ -73,6 +115,13 @@ export function WorkoutSession({ id }: { id: string }) {
   }
 
   const save = (patch: Partial<Workout>) => putWorkout({ ...workout, ...patch });
+  // перестановка с отменой: возвращаем порядок и связки, какими они были, не трогая остальные правки
+  const reorderWithUndo = (next: WorkoutExercise[], msg: string) => {
+    const prev = workout.exercises;
+    void save({ exercises: next });
+    toast(msg, { label: 'Отменить', run: () => { void db.workouts.get(workout.id).then((cur) => { if (cur) void putWorkout({ ...cur, exercises: restoreLayout(cur.exercises, prev) }); }); } });
+  };
+  dropRef.current = (from, to) => reorderWithUndo(moveBlock(workout.exercises, from, to), 'Порядок изменён');
   // Берём свежую запись из базы, а не замкнутую копию: два быстрых изменения подряд (тип подхода и заметка)
   // иначе затирали друг друга, пока экран не успел обновиться.
   // Изменения идут строго по очереди: параллельное чтение-запись тоже теряло бы правки.
@@ -90,23 +139,45 @@ export function WorkoutSession({ id }: { id: string }) {
     updateExercise(weId, (we) => ({ ...we, sets: we.sets.map((s) => (s.id === setId ? { ...s, ...patch } : s)) }));
 
   const info = groupInfo(workout.exercises);
+  // блок = одиночное упражнение или суперсет целиком: его двигают вместе
+  const blocks = blocksOf(workout.exercises);
+  const blockNo: number[] = [];
+  blocks.forEach((b, bi) => { for (let i = b.start; i < b.end; i++) blockNo[i] = bi; });
 
   const toggleDone = (we: WorkoutExercise, s: SetEntry) => {
     const done = !s.done;
-    void updateSet(we.id, s.id, { done, completedAt: done ? Date.now() : undefined });
+    const at = Date.now();
+    // Висящая плашка уборки закрывается молча при любой новой отметке: приоритет у действия пользователя,
+    // отложенный отдых за прошлое упражнение не запускается.
+    cleanup.dismiss();
+    // время подхода: от «Начать» или от конца отдыха до этой галочки; при отмене галочки стираем
+    let patch: Partial<SetEntry> = { done, completedAt: done ? at : undefined };
+    if (done) {
+      const ex0 = workout.exercises.findIndex((x) => x.id === we.id);
+      const restRunning = timer.active && timer.remainingSec > 0;
+      const start = isActive ? resolveSetStart(workout.exercises, ex0, s, timer.lastEndedAt, restRunning) : null;
+      patch = { ...patch, workSec: workSecBetween(start, at) };
+    } else {
+      patch = { ...patch, workSec: undefined, startedAt: undefined };
+    }
+    void updateSet(we.id, s.id, patch);
     if (done) { setPopId(s.id); window.setTimeout(() => setPopId((p) => (p === s.id ? null : p)), 450); }
     if (done && isActive) {
       const ex = exMap.get(we.exerciseId);
       const ei = workout.exercises.findIndex((x) => x.id === we.id);
       const next = we.sets[we.sets.findIndex((x) => x.id === s.id) + 1];
-      const rest = restAfter({ superset: info[ei], nextSetKind: next?.kind, restSec: ex?.restSec ?? settings.defaultRestSec });
-      if (rest !== null) timer.start(rest);
+      const rest = restAfter({ superset: info[ei], nextSetKind: next?.kind, restSec: resolveRest(ex, settings.defaultRestSec).sec });
+      // последний рабочий подход упражнения (или связки): вместо отдыха плашка уборки, отдых стартует после галочки
+      const cleanupOpts = { exercises: workout.exercises, groupInfo: info, index: ei, exerciseMap: exMap };
+      const plan = planAfterSet({ enabled: settings.cleanupEnabled, show: shouldShowCleanup({ ...cleanupOpts, set: s }), rest, label: cleanupLabel(cleanupOpts) });
+      if (plan.kind === 'gate') cleanup.open(plan.gate);
+      else if (plan.kind === 'rest') timer.start(plan.sec);
       else if (info[ei]?.nextIndex != null) {
         const n = workout.exercises[info[ei].nextIndex!];
         toast(`Дальше ${info[info[ei].nextIndex!].label}: ${exMap.get(n.exerciseId)?.name ?? 'упражнение'}`);
       }
     }
-    if (!done) timer.skip();
+    if (!done) timer.cancel();
   };
 
   const addSet = (we: WorkoutExercise) => {
@@ -119,11 +190,25 @@ export function WorkoutSession({ id }: { id: string }) {
     void updateExercise(we.id, (x) => ({ ...x, sets: x.sets.slice(0, -1) }));
   };
 
+  const acceptRest = async (ex: Exercise, sec: number) => {
+    await putExercise({ ...ex, restSec: sec });
+    toast(`Отдых для «${ex.name}»: ${formatRest(sec)}`);
+  };
+  const dismissRest = (exerciseId: string) => { void db.kv.put({ key: restDismissKey(exerciseId), value: Date.now() }); };
+
   const removeExercise = (we: WorkoutExercise) => {
+    cleanup.dismiss();
     const name = exMap.get(we.exerciseId)?.name ?? 'упражнение';
-    if (!confirm(`Убрать «${name}» из тренировки?`)) return;
-    if (we.cardio?.trackId) void softDelete('tracks', we.cardio.trackId);
+    if (we.cardio?.trackId) {
+      // у кардио вместе с упражнением удаляется записанный трек, это не вернуть: спрашиваем заранее
+      if (!confirm(`Убрать «${name}» из тренировки?`)) return;
+      void softDelete('tracks', we.cardio.trackId);
+      void save({ exercises: workout.exercises.filter((x) => x.id !== we.id) });
+      return;
+    }
+    const at = workout.exercises.findIndex((x) => x.id === we.id);
     void save({ exercises: workout.exercises.filter((x) => x.id !== we.id) });
+    toast(`«${name}» убрано`, { label: 'Вернуть', run: () => { void db.workouts.get(workout.id).then((cur) => { if (cur) void putWorkout({ ...cur, exercises: insertAt(cur.exercises, we, at) }); }); } });
   };
 
   const doSwap = async (weId: string, next: Exercise) => {
@@ -149,18 +234,20 @@ export function WorkoutSession({ id }: { id: string }) {
 
   const start = () => save({ status: 'active', startedAt: Date.now(), date: workout.date });
   const finish = async () => {
-    timer.skip();
+    timer.cancel();
+    cleanup.dismiss();
     await save({ status: 'done', finishedAt: Date.now() });
     void submitWorld().catch(() => { /* итоги уйдут при следующей попытке; ошибка видна в рейтинге */ });
     // награда считается до показа итогов, но её сбой не должен мешать завершить тренировку
     setReward(await reconcileGame().catch(() => null));
     setSummary(true);
   };
-  const reopen = () => save({ status: 'active', finishedAt: undefined });
+  const reopen = () => { cleanup.dismiss(); return save({ status: 'active', finishedAt: undefined }); };
 
   const remove = async () => {
     if (!confirm('Удалить тренировку? Это действие нельзя отменить.')) return;
-    timer.skip();
+    timer.cancel();
+    cleanup.dismiss();
     for (const t of await db.tracks.where('workoutId').equals(workout.id).toArray()) if (!t.deletedAt) await softDelete('tracks', t.id);
     await softDelete('workouts', workout.id);
     toast('Тренировка удалена');
@@ -185,11 +272,14 @@ export function WorkoutSession({ id }: { id: string }) {
           <div className="sub cap">
             {formatDateLong(workout.date)}
             {isActive && ` · ${formatClock(elapsed / 1000)}`}
+            {forecast && ` · ${isActive ? 'осталось ' : ''}≈ ${formatForecast(forecast.sec)}`}
           </div>
         </div>
         <button className="icon-btn room-btn" onClick={roomUi.openSheet} aria-label="Рядом: комната с другом"><IconNearby />{roomPhase !== 'idle' && <i className="room-dot" aria-hidden="true" />}</button>
         <button className="icon-btn" onClick={() => go('assistant')} aria-label="Спросить ассистента"><IconSpark /></button>
       </div>
+
+      {workout.status !== 'done' && <EaseCard workoutId={workout.id} compact />}
 
       {workout.status === 'planned' && (
         <button className="btn primary block" onClick={start} style={{ marginBottom: 8 }}>Начать тренировку</button>
@@ -205,10 +295,33 @@ export function WorkoutSession({ id }: { id: string }) {
         const todo = we.sets.filter((x) => !x.done);
         const sugUseful = !!sug && todo.some((x) => x.weight !== sug.weight || x.reps !== sug.reps);
         return (
-          <section key={we.id} className={'ex-block' + (info[idx].label ? ' in-superset' : '')} style={{ '--i': Math.min(idx, 6) } as CSSProperties}>
+          <section key={we.id} data-block={blockNo[idx]} className={'ex-block' + (info[idx].label ? ' in-superset' : '')} style={{ '--i': Math.min(idx, 6) } as CSSProperties}>
             <div className="ex-head">
-              <div>
+              {blocks.length > 1 && (
+                <button className="icon-btn drag-handle" aria-label={info[idx].label ? 'Перетащить суперсет' : 'Перетащить упражнение'} {...reorder.handleProps(blockNo[idx])}><IconGrip size={20} /></button>
+              )}
+              <div style={{ flex: 1, minWidth: 0 }}>
                 <div className="ex-name">{info[idx].label && <span className="ss-chip" title="Суперсет">{info[idx].label}</span>}{ex?.name ?? 'Удалённое упражнение'}</div>
+                {!cardio && workout.status !== 'done' && (() => {
+                  const r = resolveRest(ex, settings.defaultRestSec);
+                  const ri = restInfo.get(we.exerciseId);
+                  const anyDone = we.sets.some((x) => x.done);
+                  return (
+                    <>
+                      <div className="hint rest-hint">
+                        Отдых {formatRest(r.sec)} · {REST_SOURCE_LABEL[r.source]}
+                        {isActive && anyDone && ri?.last ? ` · в прошлый раз отдыхал ${formatRest(ri.last.avgSec)}` : ''}
+                      </div>
+                      {isActive && ex && ri?.suggestion && (
+                        <div className="hint suggest hold">
+                          Последние {SUGGEST_MIN_WORKOUTS} тренировки ты отдыхаешь {ri.suggestion.direction === 'longer' ? 'дольше' : 'короче'}, чем стоит ({formatRest(ri.suggestion.currentSec)}): около {formatRest(ri.suggestion.avgsSec.reduce((a, x) => a + x, 0) / ri.suggestion.avgsSec.length)}.{' '}
+                          <button className="link-btn" onClick={() => void acceptRest(ex, ri.suggestion!.sec)}>Поставить {formatRest(ri.suggestion.sec)}</button>{' '}
+                          <button className="link-btn" onClick={() => dismissRest(we.exerciseId)}>Не сейчас</button>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
                 {last && (
                   <div className="hint">
                     В прошлый раз: {last.sets.map((s) => `${formatNum(s.weight)}×${s.reps}${s.kind && s.kind !== 'normal' ? ` (${SET_KIND_SHORT[s.kind]})` : ''}`).join(', ')}
@@ -249,6 +362,14 @@ export function WorkoutSession({ id }: { id: string }) {
                   <IconCheck />
                 </button>
               </div>
+              {isActive && !s.done && needsManualStart(workout.exercises, idx, s.id) && (
+                <div className="set-time">
+                  {typeof s.startedAt === 'number'
+                    ? <span className="running">идёт {formatSetTime(Math.max(0, now - s.startedAt) / 1000)}</span>
+                    : <button className="link-btn" onClick={() => void updateSet(we.id, s.id, { startedAt: Date.now() })}>▶ Начать подход</button>}
+                </div>
+              )}
+              {s.done && typeof s.workSec === 'number' && <div className="set-time"><span className="took">⏱ {formatSetTime(s.workSec)}</span></div>}
               {openSet === s.id && (
                 <div className="set-extra">
                   <div className="seg three" data-i={(['normal', 'drop', 'restpause'] as SetKind[]).indexOf(s.kind ?? 'normal')} role="group" aria-label="Тип подхода">
@@ -279,14 +400,21 @@ export function WorkoutSession({ id }: { id: string }) {
               </div>
             ))}
 
-            {!cardio && (
+            {(!cardio || blocks.length > 1) && (
               <div className="ex-actions">
+                {!cardio && <>
                 <button className="btn small" onClick={() => addSet(we)}>Добавить подход</button>
                 {info[idx].label && !info[idx].isLast
                   ? <button className="btn small ghost" onClick={() => void save({ exercises: splitAfter(workout.exercises, idx) })}>Разорвать суперсет</button>
                   : idx < workout.exercises.length - 1 && <button className="btn small ghost" onClick={() => void save({ exercises: linkWithNext(workout.exercises, idx) })}>Суперсет со следующим</button>}
                 <button className="btn small ghost" onClick={() => setPlates((todo[0] ?? we.sets[we.sets.length - 1])?.weight ?? 0)}>Блины</button>
                 {we.sets.length > 1 && <button className="btn small ghost" onClick={() => removeLastSet(we)}>Убрать последний</button>}
+                </>}
+                {blocks.length > 1 && <>
+                  <button className="btn small ghost" disabled={blockNo[idx] === 0} aria-label={info[idx].label ? 'Суперсет выше' : 'Упражнение выше'} onClick={() => reorderWithUndo(stepBlock(workout.exercises, idx, -1), 'Порядок изменён')}><IconArrowUp size={16} /></button>
+                  <button className="btn small ghost" disabled={blockNo[idx] === blocks.length - 1} aria-label={info[idx].label ? 'Суперсет ниже' : 'Упражнение ниже'} onClick={() => reorderWithUndo(stepBlock(workout.exercises, idx, 1), 'Порядок изменён')}><IconArrowDown size={16} /></button>
+                  {blockNo[idx] < blocks.length - 2 && <button className="btn small ghost" onClick={() => reorderWithUndo(moveBlock(workout.exercises, blockNo[idx], blocks.length - 1), 'Перенесено в конец')}>В конец</button>}
+                </>}
               </div>
             )}
           </section>
@@ -328,6 +456,10 @@ function FinishSheet({ workout, reward, onClose }: { workout: Workout; reward: R
   const [saved, setSaved] = useState(false);
   const dur = workout.startedAt && workout.finishedAt ? workout.finishedAt - workout.startedAt : 0;
   const cardioM = workout.exercises.reduce((a, we) => a + (we.cardio?.distanceM ?? 0), 0);
+  // шаблон, из которого начата тренировка: если порядок упражнений изменился, предлагаем запомнить новый
+  const tpl = useLiveQuery(() => (workout.templateId ? db.templates.get(workout.templateId) : undefined), [workout.templateId]);
+  const reordered = useMemo(() => (tpl && !tpl.deletedAt ? templateWithWorkoutOrder(tpl, workout) : null), [tpl, workout]);
+  const [orderSaved, setOrderSaved] = useState(false);
 
   return (
     <Sheet title="Тренировка завершена" onClose={onClose}>
@@ -361,6 +493,16 @@ function FinishSheet({ workout, reward, onClose }: { workout: Workout; reward: R
       >
         {saved ? 'Шаблон сохранён' : 'Сохранить как шаблон'}
       </button>
+      {reordered && (
+        <button
+          className="btn block"
+          style={{ marginTop: 10 }}
+          disabled={orderSaved}
+          onClick={async () => { await putTemplate(reordered); setOrderSaved(true); toast('Порядок сохранён в шаблоне'); }}
+        >
+          {orderSaved ? `Порядок сохранён в «${reordered.title}»` : `Запомнить порядок в шаблоне «${reordered.title}»`}
+        </button>
+      )}
       <button className="btn primary block" style={{ marginTop: 10 }} onClick={onClose}>Готово</button>
     </Sheet>
   );

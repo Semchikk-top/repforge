@@ -1,6 +1,6 @@
 // Данные оператора и ссылки. ЗАПОЛНИТЬ ПЕРЕД ПУБЛИКАЦИЕЙ: значения в угловых скобках — заглушки.
 export const LEGAL = {
-  updated: '02.11.2026',
+  updated: '04.11.2026',
   operator: 'Коломацкий Семён Дмитриевич, применяющий НПД, ИНН 421815687221',
   email: 'simonkolom@mail.ru',
   privacyUrl: 'https://semchikk-top.github.io/repforge/privacy/',

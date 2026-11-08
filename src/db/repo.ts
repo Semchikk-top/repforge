@@ -1,4 +1,5 @@
 import { db } from './db';
+import { BACKUP_TABLES, decide, sanitizeSettings, validateBackup } from './backupInspect';
 import { uid, newId, toDateStr } from '../lib';
 import { checkInId, normalizeCheckIn, type CheckInDraft } from '../domain/checkin';
 import type { ImportPlan } from '../domain/importWorkouts';
@@ -362,50 +363,31 @@ export async function exportAll(): Promise<string> {
     db.checkins.toArray(),
     loadSettings()
   ]);
-  return JSON.stringify({ version: 1, exportedAt: Date.now(), exercises, workouts, templates, tracks, body, programs, game, checkins, settings }, null, 2);
+  const counts = { exercises: exercises.length, workouts: workouts.length, templates: templates.length, tracks: tracks.length, body: body.length, programs: programs.length, game: game.length, checkins: checkins.length };
+  // counts — сверка при импорте: неполный файл (обрезанный вручную, потерянный раздел) не примется молча
+  return JSON.stringify({ version: 1, exportedAt: Date.now(), counts, exercises, workouts, templates, tracks, body, programs, game, checkins, settings }, null, 2);
 }
 
 export async function importAll(json: string): Promise<{ exercises: number; workouts: number; templates: number }> {
-  const data = JSON.parse(json);
-  if (!data || data.version !== 1) throw new Error('Неизвестный формат файла');
+  // Сначала проверка: битая или чужая копия не должна изменить ни одной записи
+  const v = validateBackup(json);
+  if (!v.ok) throw new Error(v.error);
+  const data = v.data;
   const deviceId = await getDeviceId();
-  let ex = 0, wk = 0, tp = 0;
+  const written: Record<string, number> = {};
   await db.transaction('rw', [db.exercises, db.workouts, db.templates, db.tracks, db.body, db.programs, db.game, db.checkins, db.changes], async () => {
-    // Импорт по правилу «побеждает более свежая запись»
-    for (const e of (data.exercises ?? []) as Exercise[]) {
-      const cur = await db.exercises.get(e.id);
-      if (!cur || cur.updatedAt < e.updatedAt) { await db.exercises.put(e); await logChange('exercises', e.id, 'put', deviceId); ex++; }
-    }
-    for (const w of (data.workouts ?? []) as Workout[]) {
-      const cur = await db.workouts.get(w.id);
-      if (!cur || cur.updatedAt < w.updatedAt) { await db.workouts.put(w); await logChange('workouts', w.id, 'put', deviceId); wk++; }
-    }
-    for (const t of (data.templates ?? []) as Template[]) {
-      const cur = await db.templates.get(t.id);
-      if (!cur || cur.updatedAt < t.updatedAt) { await db.templates.put(t); await logChange('templates', t.id, 'put', deviceId); tp++; }
-    }
-    for (const b of (data.body ?? []) as BodyEntry[]) {
-      const cur = await db.body.get(b.id);
-      if (!cur || cur.updatedAt < b.updatedAt) { await db.body.put(b); await logChange('body', b.id, 'put', deviceId); }
-    }
-    for (const t of (data.programs ?? []) as Program[]) {
-      const cur = await db.programs.get(t.id);
-      if (!cur || cur.updatedAt < t.updatedAt) { await db.programs.put(t); await logChange('programs', t.id, 'put', deviceId); }
-    }
-    for (const g of (data.game ?? []) as GameRow[]) {
-      const cur = await db.game.get(g.id);
-      if (!cur || cur.updatedAt < g.updatedAt) { await db.game.put(g); await logChange('game', g.id, 'put', deviceId); }
-    }
-    for (const c of (data.checkins ?? []) as CheckIn[]) {
-      if (!c || typeof c.id !== 'string' || (c.slot !== 'morning' && c.slot !== 'evening')) continue; // чужой или битый файл: пропускаем запись
-      const cur = await db.checkins.get(c.id);
-      if (!cur || cur.updatedAt < c.updatedAt) { await db.checkins.put(c); await logChange('checkins', c.id, 'put', deviceId); }
-    }
-    for (const t of (data.tracks ?? []) as Track[]) {
-      const cur = await db.tracks.get(t.id);
-      if (!cur || cur.updatedAt < t.updatedAt) { await db.tracks.put(t); await logChange('tracks', t.id, 'put', deviceId); }
+    // Побеждает более свежая запись: решение то же, что показывает предпросмотр (decide)
+    for (const t of BACKUP_TABLES) {
+      const table = db[t] as unknown as { get(id: string): Promise<{ updatedAt: number } | undefined>; put(row: unknown): Promise<unknown> };
+      for (const row of data[t] ?? []) {
+        const d = decide(await table.get(row.id), row);
+        if (d !== 'add' && d !== 'replace') continue;
+        await table.put(row);
+        await logChange(t, row.id, 'put', deviceId);
+        written[t] = (written[t] ?? 0) + 1;
+      }
     }
   });
-  if (data.settings) await saveSettings({ ...DEFAULT_SETTINGS, ...data.settings });
-  return { exercises: ex, workouts: wk, templates: tp };
+  if (data.settings) await saveSettings(sanitizeSettings(data.settings));
+  return { exercises: written.exercises ?? 0, workouts: written.workouts ?? 0, templates: written.templates ?? 0 };
 }

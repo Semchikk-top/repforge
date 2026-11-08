@@ -1,1 +1,0 @@
-import{j as e}from"./index-BNbJOn9C.js";function n({checked:s,onChange:t,label:a}){return e.jsxs("span",{className:"toggle",children:[e.jsx("input",{type:"checkbox",role:"switch","aria-label":a,checked:s,onChange:o=>t(o.target.checked)}),e.jsx("i",{})]})}export{n as T};

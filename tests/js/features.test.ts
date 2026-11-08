@@ -92,7 +92,7 @@ describe('цели недели', () => {
       w('3', '2026-10-18', 'run', [], { cardio: { source: 'gps', distanceM: 9000, durationSec: 3000 } }), // прошлая неделя
       w('4', '2026-10-22', 'bench', [set(80, 8)]),
     ];
-    expect(weekProgress(all, ex, now)).toEqual({ workouts: 3, km: 5 });
+    expect(weekProgress(all, ex, now)).toEqual({ days: 3, sessions: 3, km: 5 });
   });
 });
 

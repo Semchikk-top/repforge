@@ -12,6 +12,21 @@ export interface SyncFailure {
 }
 
 export const MSG_SERVER_OUTDATED = 'Сервер старее приложения: обнови сервер на ПК (git pull, затем bash deploy/install.sh).';
+/** Мягкое предупреждение: протокол совместим, но сервер собран из более старой версии, чем приложение. */
+export const msgServerOlder = (server: string, client: string): string =>
+  `Сервер на ПК (версия ${server}) старее приложения (${client}). Синхронизация работает, но новые возможности могут не сохраняться: обнови сервер (git pull, затем bash deploy/install.sh).`;
+
+const verParts = (v: string): number[] => v.replace(/-.*$/, '').split('.').map((x) => (Number.isFinite(Number(x)) ? Number(x) : 0));
+
+/** true, только если обе версии известны и версия сервера строго меньше версии приложения. 'unknown' и 'dev' не сравниваем. */
+export function serverOlderThanClient(serverVersion: string | null | undefined, clientVersion: string): boolean {
+  const ok = (v: string | null | undefined): v is string => typeof v === 'string' && /^\d+(\.\d+)*/.test(v);
+  if (!ok(serverVersion) || !ok(clientVersion)) return false;
+  const a = verParts(serverVersion), b = verParts(clientVersion);
+  for (let i = 0; i < Math.max(a.length, b.length); i++) if ((a[i] ?? 0) !== (b[i] ?? 0)) return (a[i] ?? 0) < (b[i] ?? 0);
+  return false;
+}
+
 export const MSG_CLIENT_OUTDATED = 'Приложение слишком старое для этого сервера: обнови приложение.';
 
 /**

@@ -44,9 +44,18 @@ export function createRelay(o = {}) {
     return req.socket.remoteAddress ?? 'unknown';
   };
 
+  // Защита от забивания: не больше maxConnPerIp открытых соединений с адреса и не больше msgLimit сообщений за окно в одном соединении
+  const maxConnPerIp = o.maxConnPerIp ?? 20;
+  const msgLimit = { max: 40, windowMs: 10_000, ...(o.msgLimit ?? {}) };
+  const open = new Map();
+
   wss.on('connection', (ws, req) => {
+    const ip = clientIp(req);
+    if ((open.get(ip) ?? 0) >= maxConnPerIp) { ws.close(1013, 'busy'); log('отклонено: слишком много соединений с адреса'); return; }
+    open.set(ip, (open.get(ip) ?? 0) + 1);
+    const stamps = [];
     const conn = {
-      ip: clientIp(req), room: null, role: null,
+      ip, room: null, role: null,
       send(obj) { if (ws.readyState === 1) ws.send(JSON.stringify(obj)); },
       close() { try { ws.close(1000); } catch { /* уже закрыт */ } }
     };
@@ -56,12 +65,20 @@ export function createRelay(o = {}) {
     ws.isAlive = true;
     ws.on('pong', () => { ws.isAlive = true; });
     ws.on('message', (data, isBinary) => {
+      const t = Date.now();
+      while (stamps.length && t - stamps[0] > msgLimit.windowMs) stamps.shift();
+      stamps.push(t);
+      if (stamps.length > msgLimit.max) { ws.close(1008, 'rate'); return; }
       if (isBinary) return conn.send({ t: 'error', code: 'bad-message', message: 'Нужен текст' });
       let msg;
       try { msg = JSON.parse(data.toString()); } catch { return conn.send({ t: 'error', code: 'bad-message', message: 'Некорректный JSON' }); }
       store.handle(conn, msg);
     });
-    ws.on('close', () => { clearTimeout(idle); store.disconnect(conn); });
+    ws.on('close', () => {
+      clearTimeout(idle); store.disconnect(conn);
+      const n = (open.get(ip) ?? 1) - 1;
+      if (n <= 0) open.delete(ip); else open.set(ip, n);
+    });
     ws.on('error', () => { /* обрыв: обработает close */ });
   });
 

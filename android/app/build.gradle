@@ -10,11 +10,15 @@ def keystorePropsFile = rootProject.file('keystore.properties')
 def keystoreProps = new Properties()
 if (keystorePropsFile.exists()) keystorePropsFile.withInputStream { keystoreProps.load(it) }
 
+// Флаг --debug у scripts/build-android.mjs передаёт -PappIdSuffix=.debug: отладочная копия
+// ставится рядом с релизной. В обычной сборке суффикса нет.
+def appIdSuffix = project.findProperty('appIdSuffix') ?: ''
+
 android {
     namespace = "app.repforge.workout"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "app.repforge.workout"
+        applicationId "app.repforge.workout${appIdSuffix}"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode vMajor * 10000 + vMinor * 100 + vPatch

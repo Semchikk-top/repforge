@@ -18,7 +18,7 @@ export function mondayOf(date: string): Date {
 
 export const slotKey = (programId: string, week: number, weekday: number) => `${programId}:${week}:${weekday}`;
 
-export interface PlannedSlot { date: string; title: string; programSlot: string; exercises: WorkoutExercise[] }
+export interface PlannedSlot { date: string; title: string; programSlot: string; templateId?: string; exercises: WorkoutExercise[] }
 
 /** Какие тренировки программа ещё не назначила. Уже существующие и прошедшие даты пропускаются: так повторное нажатие безопасно. */
 export function planProgram(opts: {
@@ -38,7 +38,7 @@ export function planProgram(opts: {
       if (date < today) { skippedPast++; continue; }
       const key = slotKey(program.id, week, day.weekday);
       if (have.has(key)) continue;
-      slots.push({ date, title: tpl.title, programSlot: key, exercises: exercisesFromTemplate(tpl, history, exMap) });
+      slots.push({ date, title: tpl.title, programSlot: key, templateId: tpl.id, exercises: exercisesFromTemplate(tpl, history, exMap) });
     }
   }
   return { slots, skippedPast, missingTemplates };

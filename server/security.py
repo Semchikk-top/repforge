@@ -48,8 +48,53 @@ def board_source(url: str | None) -> str:
     return f"{parts.scheme}://{host}" + (f":{port}" if port else "")
 
 
-def build_csp(relay_url: str | None = None, board_url: str | None = None) -> str:
+# Уличное кардио (карта, маршрут, поиск адреса) ходит только на эти источники, и только после действия пользователя.
+# По умолчанию — бесплатные публичные сервисы без ключей: тайлы и стили OpenFreeMap, маршруты Valhalla (FOSSGIS), поиск Nominatim.
+# Свои копии (self-host): WORKOUT_MAP_ORIGINS=https://tiles.example,https://route.example,https://geo.example (через запятую,
+# заменяет список целиком; пустая строка полностью отключает внешние запросы карты). Те же адреса задаются при сборке клиента:
+# VITE_MAP_STYLE_LIGHT, VITE_MAP_STYLE_DARK, VITE_ROUTER_URL, VITE_GEOCODER_URL.
+DEFAULT_MAP_ORIGINS = (
+    "https://tiles.openfreemap.org",
+    "https://valhalla1.openstreetmap.de",
+    "https://nominatim.openstreetmap.org",
+)
+
+
+def map_origin(url: str | None) -> str:
+    """Источник для connect-src из адреса сервиса карты: только https://хост[:порт]; путь отбрасывается, а логин, шаблоны (*) и мусор отклоняются."""
+    if not url:
+        return ""
+    try:
+        parts = urlsplit(url.strip())
+        port = parts.port
+    except ValueError:
+        return ""
+    if parts.scheme != "https" or not parts.hostname or parts.username or parts.password:
+        return ""
+    host = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname
+    if any(ch in host for ch in " ;,'\"*"):
+        return ""
+    return f"https://{host}" + (f":{port}" if port else "")
+
+
+def map_sources(raw: str | None) -> tuple[str, ...]:
+    """Список источников карты из WORKOUT_MAP_ORIGINS. None — не задано: публичные по умолчанию; пустая строка — выключено."""
+    if raw is None:
+        return DEFAULT_MAP_ORIGINS
+    out: list[str] = []
+    for item in raw.split(","):
+        src = map_origin(item)
+        if src and src not in out:
+            out.append(src)
+    return tuple(out)
+
+
+def build_csp(relay_url: str | None = None, board_url: str | None = None, map_origins: tuple[str, ...] | list[str] = ()) -> str:
     connect = "'self'" + (f" {relay_source(relay_url)}" if relay_source(relay_url) else "") + (f" {board_source(board_url)}" if board_source(board_url) else "")
+    for src in map_origins:
+        checked = map_origin(src)
+        if checked and checked not in connect.split():
+            connect += f" {checked}"
     return (
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
         f"font-src 'self' data:; connect-src {connect}; manifest-src 'self'; worker-src 'self'; "
@@ -61,7 +106,7 @@ def build_csp(relay_url: str | None = None, board_url: str | None = None) -> str
 # Он же задаётся при сборке клиента как VITE_ROOM_RELAY_URL. Камера не нужна: комната работает по коду.
 # Сервис мирового рейтинга (отдельный публичный сервис board/): WORKOUT_BOARD_URL=https://board.example
 # Он же задаётся при сборке клиента как VITE_BOARD_URL.
-CSP = build_csp(os.environ.get("WORKOUT_ROOM_RELAY_URL"), os.environ.get("WORKOUT_BOARD_URL"))
+CSP = build_csp(os.environ.get("WORKOUT_ROOM_RELAY_URL"), os.environ.get("WORKOUT_BOARD_URL"), map_sources(os.environ.get("WORKOUT_MAP_ORIGINS")))
 HEADERS = {
     b"content-security-policy": CSP.encode(),
     b"x-content-type-options": b"nosniff",

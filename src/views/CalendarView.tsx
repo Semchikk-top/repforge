@@ -5,7 +5,7 @@ import { WeeklyReviewCard } from './WeeklyReviewCard';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import type { Workout } from '../domain/types';
-import { workoutSetsCount, workoutVolume } from '../domain/analytics';
+import { dailyStats, daySummaryText, workoutSetsCount, workoutVolume } from '../domain/analytics';
 import { addDays, formatDateLong, formatNum, toDateStr, todayStr, weekStart } from '../lib';
 import { go } from '../state/router';
 import { IconChevL, IconChevR } from '../ui/Icons';
@@ -30,6 +30,8 @@ export function CalendarView() {
     return m;
   }, [workouts]);
 
+  const stats = useMemo(() => new Map(dailyStats(workouts).map((d) => [d.date, d])), [workouts]);
+
   const cells = useMemo(() => {
     const start = weekStart(cursor);
     return Array.from({ length: 42 }, (_, i) => addDays(start, i));
@@ -37,6 +39,7 @@ export function CalendarView() {
 
   const monthLabel = `${cursor.toLocaleDateString('ru-RU', { month: 'long' })} ${cursor.getFullYear()}`;
   const dayWorkouts = byDate.get(sel) ?? [];
+  const selStat = stats.get(sel) ?? null;
   const shift = (n: number) => { setDir(n > 0 ? 'fwd' : 'back'); setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + n, 1)); };
   const mode: StartMode = sel === today ? 'start' : sel > today ? 'plan' : 'log';
 
@@ -60,11 +63,13 @@ export function CalendarView() {
           const ds = toDateStr(d);
           const ws = byDate.get(ds) ?? [];
           const mark = ws.some((w) => w.status !== 'planned') ? 'done' : ws.length ? 'planned' : 'none';
+          const sessions = stats.get(ds)?.sessions ?? 0;
           const cls = ['cal-day', d.getMonth() !== cursor.getMonth() ? 'out' : '', ds === today ? 'today' : '', ds === sel ? 'sel' : ''].join(' ');
           return (
             <button key={ds} className={cls} onClick={() => setSel(ds)} aria-label={formatDateLong(ds)} aria-pressed={ds === sel}>
               {d.getDate()}
               <span className={'mark ' + mark} />
+              {sessions > 1 && <span className="cal-count" aria-hidden="true">{sessions}</span>}
             </button>
           );
         })}
@@ -72,6 +77,7 @@ export function CalendarView() {
 
       <div className="section">
         <h2 key={sel} className="swap cap">{formatDateLong(sel)}</h2>
+        {selStat && <p className="sub" aria-label="Итоги дня">{daySummaryText(selStat)}</p>}
         <div key={sel + dayWorkouts.length} className="list">
           {dayWorkouts.map((w) => (
             <div key={w.id} className="row" style={{ alignItems: 'center' }}>

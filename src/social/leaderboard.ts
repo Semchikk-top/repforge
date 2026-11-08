@@ -53,6 +53,7 @@ export function buildStats(workouts: Workout[], exercises: Exercise[], period: P
   const byKey = new Map<string, ExerciseStat>();
   const out: SnapshotStats = { totals: { workouts: 0, workSets: 0, volumeKg: 0 }, exercises: [], cardio: { distanceKm: 0, movingSec: 0, sessions: 0 } };
   let distM = 0;
+  const days = new Set<string>(); // тренировочные дни: несколько тренировок за день считаются одной
 
   for (const w of workouts) {
     if (w.status !== 'done' || w.deletedAt || w.date < period.from || w.date > period.to) continue;
@@ -77,8 +78,9 @@ export function buildStats(workouts: Workout[], exercises: Exercise[], period: P
         out.totals.volumeKg += vol;
       }
     }
-    if (counted) out.totals.workouts++;
+    if (counted) days.add(w.date);
   }
+  out.totals.workouts = days.size;
   out.totals.volumeKg = r1(out.totals.volumeKg);
   out.cardio.distanceKm = r2(distM / 1000);
   out.cardio.movingSec = Math.round(out.cardio.movingSec);

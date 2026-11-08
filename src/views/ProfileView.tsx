@@ -106,7 +106,7 @@ function Overview({ stats, workouts, xp, earned, spent, unlocked, onAwards }: { 
   return (
     <>
       <div className="stat-grid">
-        <Stat v={formatNum(stats.workouts)} l="тренировок" />
+        <Stat v={formatNum(stats.workouts)} l="трен. дней" />
         <Stat v={formatNum(Math.round(stats.volumeKg / 100) / 10)} l="тонн всего" />
         <Stat v={formatNum(stats.cardioKm)} l="км кардио" />
         <Stat v={String(streak)} l="недель подряд" />

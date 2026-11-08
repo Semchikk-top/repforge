@@ -48,8 +48,8 @@ describe('экспорт CSV и Hevy', () => {
   it('CSV: заголовок и строка на каждый подход, корректные кавычки', () => {
     const csv = toCSV([workout({ exercises: [{ id: 'we', exerciseId: 'bench', sets: [{ id: 's', weight: 100, reps: 5, done: true }] }] })], new Map([['bench', { ...bench, name: 'Жим "узкий"' }]]));
     const lines = csv.split('\n');
-    expect(lines[0]).toBe('date,exercise,muscle,weight,reps,sets_done,rpe,warmup');
-    expect(lines[1]).toBe('2026-10-20,"Жим ""узкий""",chest,100,5,1,,0');
+    expect(lines[0]).toBe('date,exercise,muscle,weight,reps,sets_done,rpe,warmup,work_sec');
+    expect(lines[1]).toBe('2026-10-20,"Жим ""узкий""",chest,100,5,1,,0,');
     expect(lines).toHaveLength(2);
   });
 

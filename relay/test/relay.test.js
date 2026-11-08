@@ -255,3 +255,41 @@ test('RateLimiter: окно скользит', () => {
   t = 1001;
   assert.ok(rl.allow('k', 2, 1000));
 });
+
+test('защита от забивания: лишние соединения с одного адреса отклоняются, а закрытые освобождают место', async () => {
+  const { relay, url } = await start({ maxConnPerIp: 2 });
+  try {
+    const a = client(url), b = client(url);
+    await a.opened; await b.opened;
+    const c = client(url);
+    const code = await new Promise((res) => { c.ws.on('close', (n) => res(n)); c.ws.on('error', () => {}); });
+    assert.equal(code, 1013);
+    a.close(); await a.closed;
+    await new Promise((r) => setTimeout(r, 50));
+    const d = client(url); await d.opened;
+    d.send({ t: 'create', name: 'x', proto: 1 });
+    assert.equal((await d.next()).t, 'created');
+    d.close(); b.close();
+  } finally { await relay.close(); }
+});
+
+test('защита от забивания: поток сообщений из одного соединения обрывается', async () => {
+  const { relay, url } = await start({ msgLimit: { max: 5, windowMs: 10_000 } });
+  try {
+    const c = client(url); await c.opened;
+    for (let i = 0; i < 10; i++) c.send({ t: 'nonsense' });
+    const code = await new Promise((res) => c.ws.on('close', (n) => res(n)));
+    assert.equal(code, 1008);
+  } finally { await relay.close(); }
+});
+
+test('resume из комнаты, в которой соединение уже состоит, отклоняется', async () => {
+  const { relay, url } = await start();
+  try {
+    const { c, msg } = await create(url);
+    c.send({ t: 'resume', code: msg.code, hostToken: msg.hostToken });
+    const r = await c.next();
+    assert.equal(r.t, 'error'); assert.equal(r.code, 'bad-message');
+    c.close();
+  } finally { await relay.close(); }
+});

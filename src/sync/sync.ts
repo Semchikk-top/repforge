@@ -8,6 +8,7 @@ import { clockProblem, clockMessage, measureClock, type ClockSample } from './cl
 import { logSyncEvent } from './log';
 import { MERGE_SPECS, mergeEntity, sameRecord } from './merge';
 import { addDays, toDateStr } from '../lib';
+import { LiveChannel, POLL_MS, shouldPoll, type LiveState } from './live';
 
 // Синхронизация по журналу изменений (outbox). Один запрос = отправка своих правок + получение чужих.
 // Конфликты: побеждает запись с большим updatedAt, при равенстве — с большим deviceId (то же правило, что на сервере).
@@ -33,16 +34,20 @@ export interface SyncStatus {
   /** Последнее измерение расхождения часов с сервером. */
   clock: ClockSample | null;
   /** Что сервер сообщил о себе в последнем ответе. */
-  server: { protocol: number; minClientProtocol: number; schema: number } | null;
+  server: { protocol: number; minClientProtocol: number; schema: number; version?: string } | null;
+  /** Канал мгновенных уведомлений: live — изменения приходят сразу; иначе работает обычный опрос. */
+  live: LiveState;
 }
 
-let status: SyncStatus = { configured: false, syncing: false, lastAt: null, error: null, unauthorized: false, incompat: null, clock: null, server: null };
+let status: SyncStatus = { configured: false, syncing: false, lastAt: null, error: null, unauthorized: false, incompat: null, clock: null, server: null, live: 'off' };
 let lastIncompatAt = 0;
 const INCOMPAT_RETRY_MS = 5 * 60_000;
 const listeners = new Set<() => void>();
 const setStatus = (patch: Partial<SyncStatus>) => {
   status = { ...status, ...patch };
   listeners.forEach((l) => l());
+  // канал мгновенных уведомлений следует за этими полями: подключили устройство, отозвали токен, версии разошлись
+  if ('configured' in patch || 'unauthorized' in patch || 'incompat' in patch) syncLive();
 };
 export const getSyncStatus = () => status;
 export const subscribeSync = (l: () => void) => { listeners.add(l); return () => { listeners.delete(l); }; };
@@ -148,7 +153,8 @@ export async function unpair() {
   await db.kv.delete('sync.since');
   await db.kv.delete('sync.lastAt');
   await db.kv.delete('sync.clock');
-  setStatus({ configured: false, lastAt: null, error: null, unauthorized: false, incompat: null, clock: null, server: null });
+  setStatus({ configured: false, lastAt: null, error: null, unauthorized: false, incompat: null, clock: null, server: null, live: 'off' });
+  syncLive();
 }
 
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
@@ -302,10 +308,10 @@ export async function applyRemote(entities: WireEntity[], sentSeqs: number[], si
 let clockWarned = false;
 
 /** Версии сервера и часы из ответа на синхронизацию. Ошибка здесь не должна ломать сам обмен. */
-function trackServer(body: { protocol?: number; minClientProtocol?: number; schema?: number; serverTime?: number }, sentAt: number, receivedAt: number) {
+function trackServer(body: { protocol?: number; minClientProtocol?: number; schema?: number; serverTime?: number; serverVersion?: string }, sentAt: number, receivedAt: number) {
   try {
     if (typeof body.protocol === 'number') {
-      setStatus({ server: { protocol: body.protocol, minClientProtocol: body.minClientProtocol ?? body.protocol, schema: body.schema ?? 0 } });
+      setStatus({ server: { protocol: body.protocol, minClientProtocol: body.minClientProtocol ?? body.protocol, schema: body.schema ?? 0, ...(typeof body.serverVersion === 'string' ? { version: body.serverVersion } : {}) } });
     }
     const sample = typeof body.serverTime === 'number' ? measureClock(sentAt, receivedAt, body.serverTime) : null;
     if (!sample) return;
@@ -340,7 +346,7 @@ export function syncNow(): Promise<void> {
           return null;
         }
         const receivedAt = Date.now();
-        if (res.status === 401) { setStatus({ unauthorized: true, error: 'Устройство отключено сервером. Подключи заново.' }); void logSyncEvent('error', 'Сервер отклонил токен устройства (401)'); return null; }
+        if (res.status === 401) { setStatus({ unauthorized: true, error: 'Устройство отключено сервером. Подключи заново.' }); if (!probing) void logSyncEvent('error', 'Сервер отклонил токен устройства (401)'); return null; }
         if (!res.ok) {
           const f = parseSyncFailure(res.status, await res.json().catch(() => null));
           if (f.incompat) lastIncompatAt = receivedAt;
@@ -348,7 +354,7 @@ export function syncNow(): Promise<void> {
           void logSyncEvent('error', `${f.message} [HTTP ${res.status}]`);
           return null;
         }
-        const body = (await res.json()) as { seq: number; more: boolean; entities: WireEntity[]; protocol?: number; minClientProtocol?: number; schema?: number; serverTime?: number };
+        const body = (await res.json()) as { seq: number; more: boolean; entities: WireEntity[]; protocol?: number; minClientProtocol?: number; schema?: number; serverTime?: number; serverVersion?: string };
         trackServer(body, sentAt, receivedAt);
         await applyRemote(body.entities, seqs, body.seq, entities);
         return { more: body.more, sent: entities.length };
@@ -382,9 +388,47 @@ export function syncNow(): Promise<void> {
   return running;
 }
 
+// ---------- мгновенные уведомления (SSE) ----------
+const liveChannel = new LiveChannel({
+  fetch: (url, init) => fetch(url, init),
+  getConfig: async () => { const c = await loadConfig(); return c ? { baseUrl: c.baseUrl, token: c.token } : null; },
+  onChange: () => scheduleSync(0),
+  onState: (s) => setStatus({ live: s })
+});
+
+/** Держит канал включённым ровно тогда, когда он нужен: устройство подключено, экран открыт, версии совместимы. */
+export function syncLive() {
+  const want = status.configured && !status.unauthorized && !status.incompat && (typeof document === 'undefined' || document.visibilityState === 'visible');
+  if (want && !liveChannel.isRunning()) liveChannel.start();
+  else if (!want && liveChannel.isRunning()) liveChannel.stop();
+}
+
 // ---------- запуск в приложении ----------
 let started = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
+
+// ---------- проверка доступа после отзыва ----------
+let probing = false;
+let lastProbeAt = 0;
+/** Не чаще раза в эту паузу (кроме явного нажатия): пока устройство отозвано, сервер зря не нагружаем. */
+export const PROBE_EVERY_MS = 5 * 60_000;
+
+/**
+ * Устройство получило 401 и считается отключённым. Если его вернули на сервере (кнопка «Восстановить»), прежний токен
+ * снова работает, но само оно об этом не узнает. Пробуем обычный обмен: при успехе синхронизация возобновляется,
+ * при повторном 401 всё остаётся как было. Возвращает true, если доступ вернулся.
+ */
+export async function probeAccess(force = false): Promise<boolean> {
+  if (!status.configured || !status.unauthorized || probing) return false;
+  if (!force && Date.now() - lastProbeAt < PROBE_EVERY_MS) return false;
+  lastProbeAt = Date.now();
+  probing = true;
+  try {
+    setStatus({ unauthorized: false, error: null });
+    await syncNow();
+    return !status.unauthorized;
+  } finally { probing = false; }
+}
 
 export function scheduleSync(delay = 1500) {
   if (!status.configured || status.unauthorized) return;
@@ -402,7 +446,16 @@ export async function startSyncEngine() {
   await pruneBases().catch(() => { /* лишние предки только занимают место */ });
   db.changes.hook('creating', () => { scheduleSync(); });
   window.addEventListener('online', () => scheduleSync(300));
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') scheduleSync(300); });
-  setInterval(() => { if (document.visibilityState === 'visible') scheduleSync(0); }, 30_000);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') { scheduleSync(300); void probeAccess(); }
+    syncLive(); // в фоне канал не держим: экономим батарею, при возврате переподключаемся
+  });
+  let tick = 0;
+  setInterval(() => {
+    syncLive(); // подхватывает и подключение устройства, и отзыв токена, и снятие несовместимости
+    if (document.visibilityState === 'visible') void probeAccess(); // отозванное устройство узнает, что его вернули
+    if (document.visibilityState === 'visible' && shouldPoll(status.live, ++tick)) scheduleSync(0);
+  }, POLL_MS);
+  syncLive();
   scheduleSync(500);
 }

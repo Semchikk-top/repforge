@@ -365,3 +365,55 @@ def test_native_origins_can_be_disabled_or_replaced(env, monkeypatch):
     monkeypatch.setenv("WORKOUT_NATIVE_ORIGINS", "https://app.example.org")
     assert client.post("/api/pairing/request", json=body, headers={**LAN, "Origin": "https://app.example.org"}).status_code == 200
     assert client.post("/api/pairing/request", json=body, headers={**LAN, "Origin": NATIVE}).status_code == 403
+
+
+# ---------- уличное кардио: источники карты, маршрута и поиска в CSP ----------
+PUBLIC_MAP = {"https://tiles.openfreemap.org", "https://valhalla1.openstreetmap.de", "https://nominatim.openstreetmap.org"}
+
+
+def connect_src(csp: str) -> list[str]:
+    return next(p for p in csp.split("; ") if p.startswith("connect-src")).split()[1:]
+
+
+def test_map_sources_default_are_exact_public_origins():
+    assert set(security.map_sources(None)) == PUBLIC_MAP
+    sources = connect_src(security.build_csp(None, None, security.map_sources(None)))
+    assert set(sources) == {"'self'"} | PUBLIC_MAP
+    assert not any("*" in s for s in sources)
+
+
+def test_map_sources_can_be_replaced_or_disabled():
+    assert security.map_sources("") == ()
+    assert connect_src(security.build_csp(None, None, security.map_sources(""))) == ["'self'"]
+    custom = security.map_sources("https://tiles.example, https://route.example:8443/valhalla")
+    assert custom == ("https://tiles.example", "https://route.example:8443")
+
+
+@pytest.mark.parametrize("url", ["http://tiles.example", "https://*.example", "https://u:p@tiles.example", "javascript:alert(1)", "https://", "ftp://x.example", "https://a b.example", "*"])
+def test_map_sources_reject_bad_urls(url):
+    assert security.map_origin(url) == ""
+    assert security.map_sources(url) == ()
+
+
+def test_map_sources_do_not_loosen_the_rest_of_csp():
+    csp = security.build_csp("wss://relay.example", "https://board.example", security.map_sources(None))
+    assert "script-src 'self';" in csp and "worker-src 'self';" in csp and "frame-ancestors 'none'" in csp
+    assert "blob:" not in csp and "unsafe-eval" not in csp
+    assert "*" not in csp.replace("'self'", "")
+    assert security.build_csp(None).count("https://") == 0  # без передачи списка внешних адресов нет
+    assert len(set(connect_src(csp))) == len(connect_src(csp))  # без повторов
+
+
+def test_server_headers_carry_the_map_origins(monkeypatch):
+    import importlib
+    monkeypatch.delenv("WORKOUT_MAP_ORIGINS", raising=False)
+    fresh = importlib.reload(security)
+    try:
+        csp = fresh.HEADERS[b"content-security-policy"].decode()
+        assert PUBLIC_MAP <= set(connect_src(csp))
+        monkeypatch.setenv("WORKOUT_MAP_ORIGINS", "https://tiles.example")
+        csp2 = importlib.reload(security).HEADERS[b"content-security-policy"].decode()
+        assert "https://tiles.example" in connect_src(csp2) and not (PUBLIC_MAP & set(connect_src(csp2)))
+    finally:
+        monkeypatch.delenv("WORKOUT_MAP_ORIGINS", raising=False)
+        importlib.reload(security)
