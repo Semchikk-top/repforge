@@ -243,7 +243,8 @@ def test_synthesize_calls_fish_with_reference_and_caches(env):
     r = client.post("/api/tts/synthesize", json={"voiceId": vid, "text": PHRASE}, headers=h)
     assert r.status_code == 200, r.text
     info = r.json()
-    assert info["cached"] is False and info["ext"] == "mp3" and len(info["hash"]) == 64 and info["bytes"] > 0
+    # mp3 требует ffmpeg: без него сервер честно отдаёт wav, и кеш всё равно должен работать
+    assert info["cached"] is False and info["ext"] in ("mp3", "wav") and len(info["hash"]) == 64 and info["bytes"] > 0
     assert 0.5 < info["duration"] < 0.7
     call = fish.calls[0]
     b = call["body"]
@@ -259,8 +260,8 @@ def test_synthesize_calls_fish_with_reference_and_caches(env):
     assert same["hash"] == info["hash"] and len(fish.calls) == 1
     # файл отдаётся с авторизацией и лежит с правами 0600
     a = client.get(f"/api/tts/audio/{info['hash']}", headers=h)
-    assert a.status_code == 200 and a.headers["content-type"] == "audio/mpeg" and a.content[:3] in (b"ID3",) or a.content[0] == 0xFF
-    p = tmp / "tts-cache" / f"{info['hash']}.mp3"
+    assert a.status_code == 200 and a.headers["content-type"] == tts.MEDIA[info["ext"]]
+    p = tmp / "tts-cache" / f"{info['hash']}.{info['ext']}"
     assert stat.S_IMODE(p.stat().st_mode) == 0o600 and stat.S_IMODE(p.parent.stat().st_mode) == 0o700
 
 

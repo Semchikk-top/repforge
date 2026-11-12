@@ -69,8 +69,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -r server/requirements.lock pytest
-      # сервис рейтинга (board) ставится отдельно со своим lock-файлом и здесь не проверяется
-      - run: python -m pytest -q tests --ignore=tests/ui --ignore=tests/test_board.py
+      # сервис рейтинга (board) ставится отдельно со своим lock-файлом и здесь не проверяется;
+      # тест приватности обучения импортирует board.rules, поэтому в этом job его тоже нет
+      - run: python -m pytest -q tests --ignore=tests/ui --ignore=tests/test_board.py --ignore=tests/test_learning_privacy.py
 
   relay:
     name: Релей «Рядом»
