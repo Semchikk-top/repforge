@@ -3,6 +3,7 @@
 // Чистые функции поверх истории тренировок; результат отдаётся планировщику недели (schedule.ts).
 
 import { exerciseRecords, lastPerformance } from './analytics';
+import type { Why } from './explain';
 import type { PlanTemplate } from './schedule';
 import { isCardio, type Exercise, type Template, type TemplateExercise, type Workout } from './types';
 
@@ -37,6 +38,16 @@ export function heavyThreshold(record: number, rules: HeavyRules = DEFAULT_HEAVY
 export function isHeavySet(weight: number, reps: number, record: number, rules: HeavyRules = DEFAULT_HEAVY_RULES): boolean {
   if (!(record > 0) || !(weight > 0) || reps < 1 || reps > rules.maxReps) return false;
   return weight >= heavyThreshold(record, rules);
+}
+
+/** Почему подход тяжёлый или нет: те же проверки, что в isHeavySet, в том же порядке (слой «факт»). */
+export function explainHeavySet(weight: number, reps: number, record: number, rules: HeavyRules = DEFAULT_HEAVY_RULES): Why {
+  if (!(record > 0) || !(weight > 0) || reps < 1) return { code: 'heavy-no-record' };
+  if (reps > rules.maxReps) return { code: 'heavy-many-reps', reps, maxReps: rules.maxReps };
+  const threshold = heavyThreshold(record, rules);
+  return weight >= threshold
+    ? { code: 'heavy-yes', weight, reps, record, threshold, share: rules.share, maxReps: rules.maxReps }
+    : { code: 'heavy-light', weight, reps, record, threshold };
 }
 
 export interface HeavyExerciseInfo {

@@ -66,6 +66,10 @@ export const rerouteFailText = (offline: boolean): string =>
 export const backOnRouteText = (): string => 'Вы снова на маршруте.';
 export const arrivedText = (): string => 'Вы пришли в конечную точку маршрута.';
 
+// Фразы тренировочных подсказок без чисел из замеров: их можно подготовить заранее (см. tts/classify.ts).
+export const zoneText = (z: number): string => (z >= 1 && z <= 5 ? `Пульсовая зона ${z}, ${ZONES[z - 1].name.toLowerCase()}.` : 'Пульс ниже первой зоны.');
+export const paceOkText = (): string => 'Темп в норме.';
+
 // ---------- старт, километры, итоги ----------
 
 export const startText = (plan: Pick<PlannedRoute, 'distanceM'> | null): string =>
@@ -150,7 +154,7 @@ export function coachStep(cfg: CoachConfig, prev: CoachState, s: CoachSample): {
       if (st.zoneCand !== z) { st.zoneCand = z; st.zoneSince = s.t; }
       if (st.zoneSince !== null && s.t - st.zoneSince >= HR_STABLE_MS && (st.lastZoneAt === null || s.t - st.lastZoneAt >= HR_MIN_GAP_MS)) {
         st.zone = z; st.zoneCand = null; st.zoneSince = null; st.lastZoneAt = s.t;
-        say.push(z >= 1 ? `Пульсовая зона ${z}, ${ZONES[z - 1].name.toLowerCase()}.` : 'Пульс ниже первой зоны.');
+        say.push(zoneText(z));
       }
     }
   } else { st.zoneCand = null; st.zoneSince = null; }                          // датчик пропал: ждём заново
@@ -169,7 +173,7 @@ export function coachStep(cfg: CoachConfig, prev: CoachState, s: CoachSample): {
         say.push(cfg.bike ? `${word}.` : `${word}. Сейчас ${paceWords(s.paceSecPerKm)}.`);
       }
     } else if (Math.abs(dev) <= PACE_OK) {
-      if (st.paceAnnounced && (st.lastPaceAt === null || s.t - st.lastPaceAt >= 30_000)) { say.push('Темп в норме.'); st.lastPaceAt = s.t; }
+      if (st.paceAnnounced && (st.lastPaceAt === null || s.t - st.lastPaceAt >= 30_000)) { say.push(paceOkText()); st.lastPaceAt = s.t; }
       st.paceDir = null; st.paceSince = null; st.paceAnnounced = false;
     }
   }

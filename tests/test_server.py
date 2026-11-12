@@ -88,7 +88,7 @@ def test_pagination(env, monkeypatch):
     a = pair(client, conn)
     client.post("/api/sync", json={"since": 0, "entities": [ent(f"w{i}", 100 + i) for i in range(5)]}, headers=a)
     orig = store.entities_since
-    monkeypatch.setattr("server.main.store.entities_since", lambda c, s, x, limit=2000: orig(c, s, x, limit=2))
+    monkeypatch.setattr("server.main.store.entities_since", lambda c, s, x, limit=2000, **kw: orig(c, s, x, limit=2, **kw))
     b = pair(client, conn, "dev-bbbbbbbb")
     got, since = [], 0
     for _ in range(10):
@@ -132,7 +132,7 @@ def test_sync_response_has_versions_and_server_time(env):
     a = pair(client, conn)
     r = client.post("/api/sync", json={"since": 0, "protocol": 1, "entities": []}, headers=a).json()
     assert r["protocol"] >= 1 and r["minClientProtocol"] >= 1 and r["schema"] >= 1
-    assert r["serverVersion"] == "1.2.0"  # клиент по нему предупреждает, что сервер старее приложения
+    assert r["serverVersion"] == "1.6.0"  # клиент по нему предупреждает, что сервер старее приложения
     assert abs(r["serverTime"] - __import__("time").time() * 1000) < 5000
 
 
@@ -201,6 +201,8 @@ def test_legacy_database_without_schema_row_is_adopted(tmp_path):
 def test_migrations_run_in_order_inside_transaction(tmp_path):
     path = tmp_path / "m.db"
     conn = store.connect(path)
+    # база теперь создаётся сразу на актуальной схеме (2 с версии 1.5.0), поэтому для проверки порядка откатываем номер до 1
+    conn.execute("UPDATE meta SET value = '1' WHERE key = 'schema_version'")
     order = []
     def two(c): order.append(2); c.execute("CREATE TABLE extra2(x)")
     def three(c): order.append(3); raise RuntimeError("boom")

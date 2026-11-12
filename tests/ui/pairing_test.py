@@ -75,7 +75,7 @@ with sync_playwright() as p:
 
     # ---------- запрос подключения с телефона, подтверждение на ПК ----------
     ph2 = phone()
-    ph2.goto(BASE + "#/settings")
+    ph2.goto(BASE + "#/settings/server")
     ph2.click("button:has-text('Запросить подключение к ПК')")
     ph2.wait_for_selector(".pin-wait .pin")
     pin = ph2.inner_text(".pin-wait .pin")
@@ -90,7 +90,7 @@ with sync_playwright() as p:
 
     # ---------- отказ ----------
     ph3 = phone()
-    ph3.goto(BASE + "#/settings")
+    ph3.goto(BASE + "#/settings/server")
     ph3.click("button:has-text('Запросить подключение к ПК')")
     ph3.wait_for_selector(".pin-wait .pin")
     pc.wait_for_selector(".sheet:has-text('Запрос на подключение')", timeout=10000)

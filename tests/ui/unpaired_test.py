@@ -21,7 +21,7 @@ with sync_playwright() as p:
     logs = []
     page.on("console", lambda m: logs.append(m.text) if m.type == "error" else None)
     page.on("pageerror", lambda e: logs.append(str(e)))
-    page.goto(BASE + "#/settings")
+    page.goto(BASE + "#/settings/server")
     page.wait_for_selector("h1:has-text('Настройки')", timeout=10000)
 
     button = page.locator("button:has-text('Сначала подключить устройство')")

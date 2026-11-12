@@ -4,7 +4,7 @@ import { uid, newId, toDateStr } from '../lib';
 import { checkInId, normalizeCheckIn, type CheckInDraft } from '../domain/checkin';
 import type { ImportPlan } from '../domain/importWorkouts';
 import type { StarterPlan } from '../domain/starter';
-import { DEFAULT_SETTINGS, type BodyEntry, type CheckIn, type CheckInSlot, type Exercise, type Settings, type Program, type Template, type Track, type Workout } from '../domain/types';
+import { DEFAULT_SETTINGS, type BodyEntry, type CheckIn, type CheckInSlot, type Exercise, type LearningAttempt, type Settings, type Program, type Template, type Track, type Workout } from '../domain/types';
 import type { ProfileRow } from '../social/types';
 import type { GameRow } from '../game/types';
 import { SEED_EXERCISES } from '../domain/seed';
@@ -63,7 +63,7 @@ export async function duplicateWorkout(id: string, date?: string): Promise<Worko
 }
 
 // ---------- запись с журналом изменений ----------
-type TableName = 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game' | 'checkins';
+type TableName = 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game' | 'checkins' | 'learning';
 
 // Очередь отправки хранит не шаги правки, а «эта запись изменилась»: на сервер уходит сама запись целиком
 // в её последнем виде. Поэтому правки одной записи схлопываются в одну строку очереди: вес 50 → 60 тремя
@@ -350,9 +350,45 @@ export async function ensureSeeds() {
   await db.exercises.bulkPut(rows);
 }
 
+// ---------- попытки тестов курсов (1.5.0) ----------
+/** Записывает попытку. Запись только добавляется: правки и удаления не предусмотрены, поэтому между устройствами конфликтов нет. */
+export async function addAttempt(a: { courseId: string; courseVersion: number; correct: number; total: number; threshold: number; passed: boolean }): Promise<LearningAttempt> {
+  const deviceId = await getDeviceId();
+  const now = Date.now();
+  const row: LearningAttempt = { ...a, id: uid(), createdAt: now, updatedAt: now, deviceId, date: toDateStr(new Date(now)) };
+  await db.transaction('rw', db.learning, db.changes, async () => {
+    await db.learning.put(row);
+    await logChange('learning', row.id, 'put', deviceId);
+  });
+  return row;
+}
+
+export async function listAttempts(courseId?: string): Promise<LearningAttempt[]> {
+  const rows = courseId ? await db.learning.where('courseId').equals(courseId).toArray() : await db.learning.toArray();
+  return rows.filter((r) => !r.deletedAt).sort((x, y) => x.createdAt - y.createdAt);
+}
+
+// Прогресс по урокам и прошлый набор вопросов лежат только на этом устройстве (kv не синхронизируется и в копию не входит):
+// это удобство, а не данные. Отметку о прохождении подтверждают попытки, а они синхронизируются.
+export async function getLessonsRead(courseId: string): Promise<string[]> {
+  const row = await db.kv.get(`lessons:${courseId}`);
+  return Array.isArray(row?.value) ? (row!.value as unknown[]).filter((x): x is string => typeof x === 'string') : [];
+}
+export async function markLessonRead(courseId: string, lessonId: string): Promise<void> {
+  const cur = await getLessonsRead(courseId);
+  if (!cur.includes(lessonId)) await db.kv.put({ key: `lessons:${courseId}`, value: [...cur, lessonId] });
+}
+export async function getLastQuiz(courseId: string): Promise<string[]> {
+  const row = await db.kv.get(`quiz:${courseId}`);
+  return Array.isArray(row?.value) ? (row!.value as unknown[]).filter((x): x is string => typeof x === 'string') : [];
+}
+export async function setLastQuiz(courseId: string, ids: string[]): Promise<void> {
+  await db.kv.put({ key: `quiz:${courseId}`, value: ids });
+}
+
 // ---------- экспорт / импорт ----------
 export async function exportAll(): Promise<string> {
-  const [exercises, workouts, templates, tracks, body, programs, game, checkins, settings] = await Promise.all([
+  const [exercises, workouts, templates, tracks, body, programs, game, checkins, learning, settings] = await Promise.all([
     db.exercises.toArray(),
     db.workouts.toArray(),
     db.templates.toArray(),
@@ -361,11 +397,12 @@ export async function exportAll(): Promise<string> {
     db.programs.toArray(),
     db.game.toArray(),
     db.checkins.toArray(),
+    db.learning.toArray(),
     loadSettings()
   ]);
-  const counts = { exercises: exercises.length, workouts: workouts.length, templates: templates.length, tracks: tracks.length, body: body.length, programs: programs.length, game: game.length, checkins: checkins.length };
+  const counts = { exercises: exercises.length, workouts: workouts.length, templates: templates.length, tracks: tracks.length, body: body.length, programs: programs.length, game: game.length, checkins: checkins.length, learning: learning.length };
   // counts — сверка при импорте: неполный файл (обрезанный вручную, потерянный раздел) не примется молча
-  return JSON.stringify({ version: 1, exportedAt: Date.now(), counts, exercises, workouts, templates, tracks, body, programs, game, checkins, settings }, null, 2);
+  return JSON.stringify({ version: 1, exportedAt: Date.now(), counts, exercises, workouts, templates, tracks, body, programs, game, checkins, learning, settings }, null, 2);
 }
 
 export async function importAll(json: string): Promise<{ exercises: number; workouts: number; templates: number }> {
@@ -375,7 +412,7 @@ export async function importAll(json: string): Promise<{ exercises: number; work
   const data = v.data;
   const deviceId = await getDeviceId();
   const written: Record<string, number> = {};
-  await db.transaction('rw', [db.exercises, db.workouts, db.templates, db.tracks, db.body, db.programs, db.game, db.checkins, db.changes], async () => {
+  await db.transaction('rw', [db.exercises, db.workouts, db.templates, db.tracks, db.body, db.programs, db.game, db.checkins, db.learning, db.changes], async () => {
     // Побеждает более свежая запись: решение то же, что показывает предпросмотр (decide)
     for (const t of BACKUP_TABLES) {
       const table = db[t] as unknown as { get(id: string): Promise<{ updatedAt: number } | undefined>; put(row: unknown): Promise<unknown> };

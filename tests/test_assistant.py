@@ -417,6 +417,7 @@ def test_cloud_not_configured_and_auth(env, monkeypatch):
 
 def test_status_endpoint(env):
     app, client, h = env
+    install(app, lambda req: httpx.Response(503))  # локальная Ollama не должна влиять на тест статуса
     r = client.get("/api/assistant/status", headers=h)
     assert r.status_code == 200
     body = r.json()

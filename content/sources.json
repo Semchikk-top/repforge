@@ -1,0 +1,58 @@
+[
+  {
+    "id": "hhs-physical-activity-guidelines-2e",
+    "title": "Physical Activity Guidelines for Americans, 2nd edition",
+    "author": "U.S. Department of Health and Human Services",
+    "url": "https://health.gov/our-work/nutrition-physical-activity/physical-activity-guidelines/current-guidelines",
+    "license": "Public-Domain",
+    "retrievedAt": "2026-11-12"
+  },
+  {
+    "id": "openstax-ap2e",
+    "title": "Anatomy and Physiology 2e, глава 11 «The Muscular System»",
+    "author": "OpenStax (Rice University), J. Gordon Betts и др.",
+    "url": "https://openstax.org/books/anatomy-and-physiology/pages/11-3-axial-muscles-of-the-head-neck-and-back",
+    "license": "CC-BY-4.0",
+    "retrievedAt": "2026-11-10"
+  },
+  {
+    "id": "wikipedia-cycling",
+    "title": "Cycling (Wikipedia)",
+    "author": "Wikipedia contributors",
+    "url": "https://en.wikipedia.org/wiki/Cycling",
+    "license": "CC-BY-SA-4.0",
+    "retrievedAt": "2026-11-12"
+  },
+  {
+    "id": "wikipedia-overtraining",
+    "title": "Overtraining (Wikipedia)",
+    "author": "Wikipedia contributors",
+    "url": "https://en.wikipedia.org/wiki/Overtraining",
+    "license": "CC-BY-SA-4.0",
+    "retrievedAt": "2026-11-12"
+  },
+  {
+    "id": "wikipedia-running",
+    "title": "Running (Wikipedia)",
+    "author": "Wikipedia contributors",
+    "url": "https://en.wikipedia.org/wiki/Running",
+    "license": "CC-BY-SA-4.0",
+    "retrievedAt": "2026-11-12"
+  },
+  {
+    "id": "wikipedia-strength-training",
+    "title": "Strength training (Wikipedia)",
+    "author": "Wikipedia contributors",
+    "url": "https://en.wikipedia.org/wiki/Strength_training",
+    "license": "CC-BY-SA-4.0",
+    "retrievedAt": "2026-11-12"
+  },
+  {
+    "id": "wikipedia-walking",
+    "title": "Walking (Wikipedia)",
+    "author": "Wikipedia contributors",
+    "url": "https://en.wikipedia.org/wiki/Walking",
+    "license": "CC-BY-SA-4.0",
+    "retrievedAt": "2026-11-12"
+  }
+]

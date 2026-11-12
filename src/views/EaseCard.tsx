@@ -3,10 +3,11 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '../db/db';
 import { putWorkout } from '../db/repo';
 import { detectPlateaus } from '../domain/analytics';
-import { autoregulate, canUndoEase, easeAppliedKey, easeWorkout, reliableLoadRatio } from '../domain/autoregulation';
+import { autoregulate, canUndoEase, explainEaseReason, easeAppliedKey, easeWorkout, reliableLoadRatio } from '../domain/autoregulation';
 import { checkInId, readiness } from '../domain/checkin';
 import { todayStr } from '../lib';
 import { useToast } from '../ui/Toast';
+import { WhyDecisionButton } from './WhyDecision';
 
 interface Applied { pct: number; at: number }
 
@@ -70,7 +71,7 @@ export function EaseCard({ workoutId, compact = false }: { workoutId: string; co
   if (advice.mode === 'normal') {
     return (
       <div className={'ease-card normal' + (compact ? ' compact' : '')} role="region" aria-label="Состояние на сегодня">
-        <div className="ease-head">{advice.headline}</div>
+        <div className="ease-head">{advice.headline}<WhyDecisionButton whys={advice.reasons.map(explainEaseReason)} label="состояние на сегодня" /></div>
         <p className="ease-detail">{advice.detail}</p>
         {advice.reasons.length > 0 && <ul className="ease-reasons">{advice.reasons.map((r) => <li key={r.key}>{r.text}</li>)}</ul>}
       </div>
@@ -79,7 +80,7 @@ export function EaseCard({ workoutId, compact = false }: { workoutId: string; co
 
   return (
     <div className={'ease-card' + (compact ? ' compact' : '')} role="region" aria-label="Сегодня с поправкой на состояние">
-      <div className="ease-head">{advice.headline}</div>
+      <div className="ease-head">{advice.headline}<WhyDecisionButton whys={advice.reasons.map(explainEaseReason)} label="состояние на сегодня" /></div>
       <ul className="ease-reasons" aria-label="Причины">{advice.reasons.map((r) => <li key={r.key}>{r.text}</li>)}</ul>
       {data.applied
         ? <p className="ease-detail">Поправка применена: вес снижен на {data.applied.pct}%. Дальше работай по самочувствию.</p>

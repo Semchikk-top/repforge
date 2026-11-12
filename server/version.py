@@ -11,9 +11,20 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-PROTOCOL_VERSION = 1
+# 2 (1.5.0): новая таблица `learning` (отметки о прохождении курсов). Клиенты протокола 1 остаются совместимыми:
+# MIN_CLIENT_PROTOCOL = 1, а эту таблицу им просто не отдают (см. tables_for_protocol).
+PROTOCOL_VERSION = 2
 MIN_CLIENT_PROTOCOL = 1
-SCHEMA_VERSION = 1
+# 2 (1.5.0): в базе появилась таблица `learning`. DDL не менялся (сущности лежат в общей таблице entities), но номер растёт,
+# чтобы прежний сервер не открыл базу, в которой уже есть записи, которых он не поймёт (SchemaTooNew).
+SCHEMA_VERSION = 2
+
+# С какого протокола клиент понимает таблицу.
+TABLE_SINCE_PROTOCOL = {"learning": 2}
+
+
+def tables_for_protocol(protocol: int, all_tables: set[str]) -> set[str]:
+    return {t for t in all_tables if TABLE_SINCE_PROTOCOL.get(t, 1) <= protocol}
 
 
 def app_version() -> str:

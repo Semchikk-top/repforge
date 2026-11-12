@@ -398,7 +398,8 @@ def test_map_sources_reject_bad_urls(url):
 def test_map_sources_do_not_loosen_the_rest_of_csp():
     csp = security.build_csp("wss://relay.example", "https://board.example", security.map_sources(None))
     assert "script-src 'self';" in csp and "worker-src 'self';" in csp and "frame-ancestors 'none'" in csp
-    assert "blob:" not in csp and "unsafe-eval" not in csp
+    # blob: нужен только для воспроизведения озвучки Fish из локального кеша (media-src); скрипты, воркеры и сеть его не получают
+    assert csp.replace("media-src 'self' blob:;", "") .count("blob:") == 0 and "unsafe-eval" not in csp
     assert "*" not in csp.replace("'self'", "")
     assert security.build_csp(None).count("https://") == 0  # без передачи списка внешних адресов нет
     assert len(set(connect_src(csp))) == len(connect_src(csp))  # без повторов

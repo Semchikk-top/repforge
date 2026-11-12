@@ -1,4 +1,4 @@
-"""Команды: python -m server pair | devices | revoke <id> | restore <id> | backup | run"""
+"""Команды: python -m server pair | devices | revoke <id> | restore <id> | backup | run | content …"""
 from __future__ import annotations
 
 import argparse
@@ -93,7 +93,13 @@ def main() -> int:
     run.add_argument("--host", default=os.environ.get("WORKOUT_HOST", os.environ.get("HOST", "127.0.0.1")))
     run.add_argument("--port", type=int, default=int(os.environ.get("WORKOUT_PORT", os.environ.get("PORT", "8000"))))
     run.add_argument("--mdns", action="store_true", help="опубликовать сервис в локальной сети (нужен --host 0.0.0.0)")
+    from .knowledge import cli as knowledge_cli
+
+    knowledge_cli.add_parser(sub)
     args = ap.parse_args()
+
+    if args.cmd == "content":
+        return knowledge_cli.run(args)
 
     if args.cmd == "discover":
         from . import mdns

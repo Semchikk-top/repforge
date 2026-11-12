@@ -10,7 +10,8 @@ import { KeepAwake } from '@capacitor-community/keep-awake';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Share } from '@capacitor/share';
 import { TextToSpeech } from '@capacitor-community/text-to-speech';
-import type { ScannerApi, BackupStoreApi, ExactAlarmState, FilesApi, HeartRateApi, SecureStorageApi, GeoApi, GeoWatchOptions, LifecycleApi, NotificationsApi, NotifyOptions, NotifyPermission, Platform, SpeechApi, WakeLockApi } from './types';
+import type { ScannerApi, BackupStoreApi, ExactAlarmState, FilesApi, HeartRateApi, SecureStorageApi, GeoApi, GeoWatchOptions, LifecycleApi, NotificationsApi, NotifyOptions, NotifyPermission, Platform, SpeechApi, WakeLockApi, AudioStoreApi } from './types';
+import { createHtmlAudioPlayer } from './audio';
 import { HR_MEASUREMENT_UUID, HR_SERVICE_UUID, parseHeartRate } from '../cardio/hrParse';
 import { webHaptics } from './web';
 
@@ -257,6 +258,40 @@ const speech: SpeechApi = {
   async stop() { try { await TextToSpeech.stop(); } catch { /* необязательно */ } }
 };
 
+// Готовые фразы Fish: закрытая область приложения, Directory.Data/tts. Проигрывание — <audio> по адресу из Capacitor.convertFileSrc.
+const TTS_DIR = 'tts';
+const safeName = (name: string) => name.replace(/[^A-Za-z0-9._-]/g, '_');
+const blobToBase64 = (b: Blob) => new Promise<string>((resolve, reject) => {
+  const r = new FileReader();
+  r.onload = () => resolve(String(r.result).replace(/^data:[^,]*,/, ''));
+  r.onerror = () => reject(r.error ?? new Error('Не удалось прочитать файл'));
+  r.readAsDataURL(b);
+});
+const audioStore: AudioStoreApi = {
+  available: true,
+  async put(name, data) {
+    try { await Filesystem.mkdir({ path: TTS_DIR, directory: Directory.Data, recursive: true }); } catch { /* папка уже есть */ }
+    await Filesystem.writeFile({ path: `${TTS_DIR}/${safeName(name)}`, data: await blobToBase64(data), directory: Directory.Data });
+  },
+  async has(name) {
+    try { await Filesystem.stat({ path: `${TTS_DIR}/${safeName(name)}`, directory: Directory.Data }); return true; } catch { return false; }
+  },
+  async open(name) {
+    try {
+      const { uri } = await Filesystem.getUri({ path: `${TTS_DIR}/${safeName(name)}`, directory: Directory.Data });
+      await Filesystem.stat({ path: `${TTS_DIR}/${safeName(name)}`, directory: Directory.Data });
+      return { url: Capacitor.convertFileSrc(uri), release: () => {} };
+    } catch { return null; }
+  },
+  async remove(name) { try { await Filesystem.deleteFile({ path: `${TTS_DIR}/${safeName(name)}`, directory: Directory.Data }); } catch { /* уже удалён */ } },
+  async list() {
+    try {
+      const r = await Filesystem.readdir({ path: TTS_DIR, directory: Directory.Data });
+      return r.files.filter((f) => f.type === 'file').map((f) => ({ name: f.name, bytes: f.size }));
+    } catch { return []; }
+  }
+};
+
 const scanner: ScannerApi = {
   available: true,
   async scanQr() {
@@ -284,6 +319,7 @@ export async function createNativePlatform(version: string): Promise<Platform> {
     info: { native: true, os, version },
     geo, notifications, wakeLock, lifecycle, files,
     haptics: webHaptics, // navigator.vibrate работает в WebView при разрешении VIBRATE
-    secureStorage, heartRate, backups, scanner, speech
+    secureStorage, heartRate, backups, scanner, speech,
+    audioStore, audioPlayer: createHtmlAudioPlayer()
   };
 }

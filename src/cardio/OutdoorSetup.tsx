@@ -12,6 +12,7 @@ import { formatKm } from './geo';
 import { NavMap, type MapFailReason } from './NavMap';
 import { RouteMap } from './RouteMap';
 import { targetFromText } from './target';
+import { prepareRoutePack } from '../tts/packs';
 import { MAX_WAYPOINTS, planRoute, profileFor, routeErrorText } from './valhalla';
 
 export interface OutdoorChoice { plan: PlannedRoute | null; targetPaceSecPerKm: number | null; intervals?: IntervalPlan | null }
@@ -65,7 +66,25 @@ export function OutdoorSetup({ sport, onStart, onClose }: { sport: Sport; onStar
   const ivBad = ivOn && ivPlan === null; // интервалы включены, но форма с ошибкой
   const intervals = ivOn ? ivPlan : null;
 
-  const changed = () => { setPlan(null); setError(null); };
+  // Озвучка Fish для маршрута: манёвры и стартовая фраза готовятся сейчас, на ПК, а не во время записи.
+  // Не мешает старту: что не успело или не вышло, прозвучит системным голосом.
+  const [voiceNote, setVoiceNote] = useState<string | null>(null);
+  const voiceAbort = useRef<AbortController | null>(null);
+  const prepareVoice = async (built: PlannedRoute) => {
+    voiceAbort.current?.abort();
+    if (settings.ttsEngine !== 'fish' || !settings.ttsVoiceId) { setVoiceNote(null); return; }
+    const ctl = new AbortController();
+    voiceAbort.current = ctl;
+    setVoiceNote('Готовлю озвучку маршрута…');
+    const r = await prepareRoutePack(built, settings, { signal: ctl.signal, onProgress: (p) => { if (!ctl.signal.aborted) setVoiceNote(`Готовлю озвучку маршрута: ${p.done} из ${p.total}…`); } });
+    if (ctl.signal.aborted) return;
+    setVoiceNote(r === 'busy' ? 'Озвучка уже готовится: что не успеет, прозвучит системным голосом.'
+      : r === 'skipped' ? null
+      : r.fatal ? 'ПК с озвучкой недоступен: маршрут будет озвучен системным голосом.'
+      : r.failed ? `Озвучка маршрута готова, кроме ${r.failed} фраз: они прозвучат системным голосом.` : 'Озвучка маршрута готова.');
+  };
+
+  const changed = () => { setPlan(null); setError(null); setVoiceNote(null); voiceAbort.current?.abort(); };
   const addPoint = (p: LatLon, label?: string) => {
     if (!origin && points.length === 0) { setOrigin(p); changed(); return; } // нет GPS: первая точка — старт
     if (wps.length >= MAX_WAYPOINTS) { setError(`Не больше ${MAX_WAYPOINTS} точек маршрута`); return; }
@@ -79,7 +98,11 @@ export function OutdoorSetup({ sport, onStart, onClose }: { sport: Sport; onStar
     abort.current?.abort();
     abort.current = new AbortController();
     setBusy(true); setError(null);
-    try { setPlan(await planRoute(profileFor(sport), wps, { signal: abort.current.signal })); }
+    try {
+      const built = await planRoute(profileFor(sport), wps, { signal: abort.current.signal });
+      setPlan(built);
+      void prepareVoice(built);
+    }
     catch (e) { setError(routeErrorText(e)); }
     finally { setBusy(false); }
   };
@@ -147,6 +170,7 @@ export function OutdoorSetup({ sport, onStart, onClose }: { sport: Sport; onStar
 
       <button className="btn block" disabled={busy || wps.length < 2} onClick={() => void build()}>{busy ? 'Строю маршрут…' : plan ? 'Перестроить' : 'Построить маршрут'}</button>
       {error && <p className="msg-error">{error}</p>}
+      {plan && voiceNote && <p className="sub" role="status">{voiceNote}</p>}
       {plan && <p className="sub" role="status">Маршрут: {formatKm(plan.distanceM)} км, около {formatDuration(plan.durationSec * 1000)}. Для построения начальная и конечная точки ушли сервису маршрутов.</p>}
 
       <div className="field" style={{ marginTop: 14 }}>

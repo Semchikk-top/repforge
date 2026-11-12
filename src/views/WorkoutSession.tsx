@@ -11,10 +11,11 @@ import { planAfterSet } from '../state/cleanupCore';
 import { useCleanupGate } from '../state/cleanupGate';
 import { blocksOf, insertAt, moveBlock, restoreLayout, stepBlock, templateWithWorkoutOrder } from '../domain/reorder';
 import { forecastSec, formatForecast } from '../domain/forecast';
-import { formatRest, REST_SOURCE_LABEL, resolveRest } from '../domain/rest';
-import { lastRest, restDismissKey, suggestRestChange, SUGGEST_MIN_WORKOUTS, type RestSuggestion, type WorkoutRest } from '../domain/restHints';
+import { explainRest, formatRest, REST_SOURCE_LABEL, resolveRest } from '../domain/rest';
+import { explainRestSuggestion, lastRest, restDismissKey, suggestRestChange, SUGGEST_MIN_WORKOUTS, type RestSuggestion, type WorkoutRest } from '../domain/restHints';
 import { formatSetTime, needsManualStart, resolveSetStart, workSecBetween } from '../domain/setTiming';
-import { suggestNext } from '../domain/progression';
+import { explainNext, suggestNext } from '../domain/progression';
+import { WhyDecisionButton } from './WhyDecision';
 import { PlateSheet } from '../ui/PlateSheet';
 import { formatKm } from '../cardio/geo';
 import { formatClock, formatDateLong, formatDuration, formatNum } from '../lib';
@@ -30,6 +31,7 @@ import { IconArrowDown, IconArrowUp, IconBack, IconCheck, IconGrip, IconNearby, 
 import { useBlockDrag } from '../ui/useBlockDrag';
 import { swapExercise } from '../domain/swap';
 import { SwapSheet } from './SwapSheet';
+import { WhyButton, WhyCardSheet } from './WhyCardSheet';
 import { useRoomUi } from '../nearby/RoomProvider';
 import { useRoom } from '../nearby/useRoom';
 import { Sheet } from '../ui/Sheet';
@@ -84,6 +86,7 @@ export function WorkoutSession({ id }: { id: string }) {
 
   const [picker, setPicker] = useState(false);
   const [swapping, setSwapping] = useState<string | null>(null); // id записи упражнения, которое заменяем
+  const [why, setWhy] = useState<{ id: string; name: string } | null>(null); // карточка «Зачем это»
   const [summary, setSummary] = useState(false);
   const [reward, setReward] = useState<Reconciled | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -301,7 +304,7 @@ export function WorkoutSession({ id }: { id: string }) {
                 <button className="icon-btn drag-handle" aria-label={info[idx].label ? 'Перетащить суперсет' : 'Перетащить упражнение'} {...reorder.handleProps(blockNo[idx])}><IconGrip size={20} /></button>
               )}
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div className="ex-name">{info[idx].label && <span className="ss-chip" title="Суперсет">{info[idx].label}</span>}{ex?.name ?? 'Удалённое упражнение'}</div>
+                <div className="ex-name">{info[idx].label && <span className="ss-chip" title="Суперсет">{info[idx].label}</span>}{ex?.name ?? 'Удалённое упражнение'}{ex && !ex.custom && <WhyButton exerciseId={ex.id} name={ex.name} onOpen={() => setWhy({ id: ex.id, name: ex.name })} />}</div>
                 {!cardio && workout.status !== 'done' && (() => {
                   const r = resolveRest(ex, settings.defaultRestSec);
                   const ri = restInfo.get(we.exerciseId);
@@ -311,12 +314,14 @@ export function WorkoutSession({ id }: { id: string }) {
                       <div className="hint rest-hint">
                         Отдых {formatRest(r.sec)} · {REST_SOURCE_LABEL[r.source]}
                         {isActive && anyDone && ri?.last ? ` · в прошлый раз отдыхал ${formatRest(ri.last.avgSec)}` : ''}
+                        <WhyDecisionButton whys={[explainRest(ex, settings.defaultRestSec)]} label="отдых" />
                       </div>
                       {isActive && ex && ri?.suggestion && (
                         <div className="hint suggest hold">
                           Последние {SUGGEST_MIN_WORKOUTS} тренировки ты отдыхаешь {ri.suggestion.direction === 'longer' ? 'дольше' : 'короче'}, чем стоит ({formatRest(ri.suggestion.currentSec)}): около {formatRest(ri.suggestion.avgsSec.reduce((a, x) => a + x, 0) / ri.suggestion.avgsSec.length)}.{' '}
                           <button className="link-btn" onClick={() => void acceptRest(ex, ri.suggestion!.sec)}>Поставить {formatRest(ri.suggestion.sec)}</button>{' '}
                           <button className="link-btn" onClick={() => dismissRest(we.exerciseId)}>Не сейчас</button>
+                          <WhyDecisionButton whys={[explainRestSuggestion(ri.suggestion)]} label="предложенный отдых" />
                         </div>
                       )}
                     </>
@@ -329,7 +334,7 @@ export function WorkoutSession({ id }: { id: string }) {
                 )}
                 {sug && (sugUseful || sug.kind === 'hold') && (
                   <div className={'hint suggest ' + sug.kind}>
-                    Идея на сегодня: {formatNum(sug.weight)}×{sug.reps}{' '}
+                    Идея на сегодня: {formatNum(sug.weight)}×{sug.reps}<WhyDecisionButton whys={[explainNext(history, we.exerciseId, settings.weightStep, workout.id, new Date())]} label="идея на сегодня" />{' '}
                     {sugUseful && <button className="link-btn" onClick={() => void updateExercise(we.id, (x) => ({ ...x, sets: x.sets.map((st) => (st.done ? st : { ...st, weight: sug.weight, reps: sug.reps })) }))}>Подставить</button>}{' '}
                     <button className="link-btn" onClick={async () => { await db.kv.put({ key: 'assistant.prefill', value: `Что мне делать сегодня в упражнении «${ex?.name ?? 'упражнение'}»? Учти историю. Подсказка приложения: ${formatNum(sug.weight)}×${sug.reps} (${sug.reason}).` }); go('assistant'); }}>Спросить ассистента</button>
                     <span className="why">{sug.reason}</span>
@@ -444,6 +449,7 @@ export function WorkoutSession({ id }: { id: string }) {
         const target = we && exMap.get(we.exerciseId);
         return target ? <SwapSheet target={target} all={exList} history={history} present={new Set(workout.exercises.map((x) => x.exerciseId))} onPick={(e) => void doSwap(swapping, e)} onClose={() => setSwapping(null)} /> : null;
       })()}
+      {why && <WhyCardSheet exerciseId={why.id} name={why.name} onClose={() => setWhy(null)} />}
       {plates !== null && <PlateSheet initialWeight={plates} onClose={() => setPlates(null)} />}
       {summary && <FinishSheet workout={workout} reward={reward} onClose={() => { setSummary(false); go('calendar'); }} />}
     </div>

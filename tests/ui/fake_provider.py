@@ -73,3 +73,39 @@ async def messages(req: Request):
 async def models():
     """Для проверки подключения: понимают и Anthropic-клиент, и OpenAI-совместимый (агент)."""
     return {"data": [{"id": "fake-model-1"}, {"id": "fake-model-2"}]}
+
+
+# ---------- подставной Fish Speech (для tts_test) ----------
+import io as _io
+import math as _math
+import struct as _struct
+import wave as _wave
+
+FISH_CALLS: list[int] = []
+
+
+def _fish_wav(sec: float = 0.5, rate: int = 16000) -> bytes:
+    buf = _io.BytesIO()
+    with _wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(b"".join(_struct.pack("<h", int(6000 * _math.sin(i / 12))) for i in range(int(sec * rate))))
+    return buf.getvalue()
+
+
+@app.get("/v1/health")
+async def fish_health():
+    return {"status": "ok"}
+
+
+@app.post("/v1/tts")
+async def fish_tts(request: Request):
+    from fastapi.responses import Response
+    FISH_CALLS.append(len(await request.body()))
+    return Response(_fish_wav(), media_type="audio/wav")
+
+
+@app.get("/_fish_calls")
+async def fish_calls():
+    return {"calls": len(FISH_CALLS)}

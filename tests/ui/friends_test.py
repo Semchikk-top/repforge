@@ -33,7 +33,7 @@ with sync_playwright() as p:
         return pg
 
     def make_profile(pg, name):
-        pg.goto(BASE + "#/settings")
+        pg.goto(BASE + "#/settings/server")
         pg.wait_for_selector("h2:has-text('Профиль и друзья')")
         pg.fill("#pf-name", name)
         pg.click("button:has-text('Создать профиль')")
@@ -137,13 +137,13 @@ with sync_playwright() as p:
     B.click("button:has-text('Готово')")
 
     # ---------- настройки друзей ----------
-    A.goto(BASE + "#/settings")
+    A.goto(BASE + "#/settings/server")
     A.wait_for_selector(".row:has-text('Аня')")
     A.locator("input[aria-label='Аня: участвует в рейтинге']").evaluate("el => el.click()")
     A.goto(BASE + "#/ratings")
     A.wait_for_selector("h1:has-text('Рейтинги')")
     check("друг, выключенный из рейтинга, пропадает из таблицы", A.locator(".rank-row").count() == 1)
-    A.goto(BASE + "#/settings")
+    A.goto(BASE + "#/settings/server")
     A.wait_for_selector(".row:has-text('Аня')")
     A.locator("input[aria-label='Аня: участвует в рейтинге']").evaluate("el => el.click()")
 

@@ -25,11 +25,19 @@ describe('что показать после обновления', () => {
     expect(entriesToShow(null, '1.3.0', all).map((e) => e.version)).toEqual(['1.3.0']);
     expect(entriesToShow(null, '1.2.5', all)).toEqual([]);
   });
-  it('пропущено много версий: не больше трёх свежих', () => {
-    expect(entriesToShow('0.1.0', '1.4.0', all).map((e) => e.version)).toEqual(['1.4.0', '1.3.0', '1.2.0']);
+  it('пропущено много версий: показываются все записи новее lastSeen, свежие первыми', () => {
+    expect(entriesToShow('0.1.0', '1.4.0', all).map((e) => e.version)).toEqual(['1.4.0', '1.3.0', '1.2.0', '1.1.0', '1.0.0']);
   });
-  it('в журнале есть запись для текущей версии 1.2.0 и у неё есть пункты', () => {
-    const cur = WHATS_NEW.find((e) => e.version === '1.2.0');
-    expect(cur?.items.length).toBeGreaterThan(0);
+  it('обновление с 1.0.0 показывает всю историю 1.1–1.6', () => {
+    expect(entriesToShow('1.0.0', '1.6.0').map((e) => e.version)).toEqual(['1.6.0', '1.5.0', '1.4.0', '1.3.0', '1.2.0', '1.1.0']);
+  });
+  it('неизвестная версия показывает только текущую 1.6.0', () => {
+    expect(entriesToShow(null, '1.6.0').map((e) => e.version)).toEqual(['1.6.0']);
+  });
+  it('в журнале есть записи текущих версий 1.6.0, 1.5.0 и 1.1.0, у каждой есть пункты', () => {
+    for (const version of ['1.6.0', '1.5.0', '1.1.0']) {
+      const cur = WHATS_NEW.find((e) => e.version === version);
+      expect(cur?.items.length, version).toBeGreaterThan(0);
+    }
   });
 });

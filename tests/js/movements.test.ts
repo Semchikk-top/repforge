@@ -51,8 +51,10 @@ describe('варианты замены', () => {
     const deleted = { ...custom('dead', 'Жим лёжа старый', 'chest'), deletedAt: 1 };
     const alts = alternativesFor(bench, [...all, twin, deleted], [], new Set([incline.id]));
     const ids = alts.map((a) => a.exercise.id);
-    expect(ids[0]).toBe('twin');
-    expect(alts[0].relation).toBe('same-movement');
+    // то же движение — первыми: свой «жим в Смите» и стартовый «жим гантелей лёжа» (добавлен в 1.5.0)
+    const same = alts.filter((a) => a.relation === 'same-movement').map((a) => a.exercise.id);
+    expect(same).toEqual(expect.arrayContaining(['twin', 'seed-033']));
+    expect(alts.slice(0, same.length).every((a) => a.relation === 'same-movement')).toBe(true);
     expect(ids).not.toContain(bench.id);
     expect(ids).not.toContain('dead');
     expect(ids).not.toContain(incline.id);

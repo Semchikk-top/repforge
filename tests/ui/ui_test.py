@@ -38,19 +38,23 @@ with sync_playwright() as p:
     check("индикатор вкладки сдвинулся", "translateX(400%)" in ind, ind)
     page.wait_for_timeout(500)
 
-    # --- тумблеры: реальные клики по координатам
+    # --- тумблеры: реальные клики по координатам (на вкладке «Тренировка»)
+    page.click("[role=tab]:has-text('Тренировка')")
+    page.wait_for_selector("#rest")
     toggles = page.locator(".toggle")
     n = toggles.count()
     check("найдено 8 тумблеров", n == 8, n)
     for i in range(n):
         inp = toggles.nth(i).locator("input")
         before = inp.is_checked()
+        toggles.nth(i).evaluate("el => el.scrollIntoView({block: 'center'})")  # не под фиксированной навигацией
         toggles.nth(i).click()
         page.wait_for_timeout(120)
         check(f"тумблер {i+1} переключается", inp.is_checked() != before, f"{before}->{inp.is_checked()}")
     page.screenshot(path="/tmp/settings.png")
 
-    # --- сегментный переключатель
+    # --- сегментный переключатель (вкладка «Общие»)
+    page.click("[role=tab]:has-text('Общие')")
     page.click(".seg button:has-text('Глубокая')")
     page.wait_for_timeout(100)
     check("сегмент: data-i=1", page.get_attribute(".seg", "data-i") == "1")
@@ -73,8 +77,9 @@ with sync_playwright() as p:
     page.wait_for_selector(".ex-name, button:has-text('Добавить упражнение')")
     page.click("button:has-text('Добавить упражнение')")
     page.wait_for_selector(".sheet .row")
-    page.locator(".sheet .row").nth(0).click()
-    page.locator(".sheet .row").nth(3).click()
+    # выбираем по названию: список алфавитный и растёт с версиями, а порядковый номер строки уже ломал тест
+    page.locator(".sheet .row", has_text="Жим штанги лёжа").first.click()
+    page.locator(".sheet .row", has_text="Приседания со штангой").first.click()
     page.click("button:has-text('Добавить (2)')")
     page.wait_for_selector(".ex-block")
     check("упражнения добавлены", page.locator(".ex-block").count() == 2)

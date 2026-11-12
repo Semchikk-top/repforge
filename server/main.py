@@ -20,7 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from . import db as store
-from . import live, mdns, netinfo, pairing, qr, security, version
+from . import live, mdns, netinfo, pairing, qr, security, tts, version
 from .assistant import agent, config as acfg, providers
 
 DIST_DIR = Path(os.environ.get("WORKOUT_DIST_DIR", Path(__file__).resolve().parent.parent / "dist"))
@@ -234,7 +234,7 @@ def make_app(db_path: Path | None = None) -> FastAPI:
         items = [{**e.model_dump(), "updatedAt": min(e.updatedAt, horizon)} for e in body.entities]
         with store.tx(conn):
             accepted = store.apply_entities(conn, items)
-            changes, more, last_seq = store.entities_since(conn, body.since, accepted)
+            changes, more, last_seq = store.entities_since(conn, body.since, accepted, tables=version.tables_for_protocol(client_protocol, store.ALLOWED_TABLES))
         if accepted:  # изменения уже зафиксированы: остальные устройства узнают о них сразу, не дожидаясь опроса
             app.state.bus.publish(store.current_seq(conn), dev["id"])
         return {
@@ -524,6 +524,9 @@ def make_app(db_path: Path | None = None) -> FastAPI:
                 yield f"data: {json.dumps({'type': 'error', 'message': f'Внутренняя ошибка: {e.__class__.__name__}'}, ensure_ascii=False)}\n\n"
 
         return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)
+
+    # ---------- озвучка Fish Speech ----------
+    tts.register(app, conn, auth, too_many, SSE_HEADERS, db_path.parent if db_path else None)
 
     # ---------- раздача клиента ----------
     @app.get("/{path:path}", include_in_schema=False)

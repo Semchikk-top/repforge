@@ -1,6 +1,7 @@
 // Отдых между подходами: что взять для упражнения. Чистая логика, без React и базы.
 // Приоритет: отдых из самого упражнения (exercise.restSec), иначе общая настройка (defaultRestSec).
 
+import type { Why } from './explain';
 import type { Exercise } from './types';
 
 /** Варианты в редакторе упражнения. Пустое значение — «как в настройках». */
@@ -30,6 +31,12 @@ export function resolveRest(ex: Pick<Exercise, 'restSec'> | null | undefined, de
 export const REST_SOURCE_LABEL: Record<RestSource, string> = { exercise: 'из упражнения', settings: 'из настроек' };
 
 /** «1:30» для подсказок. */
+/** Почему у упражнения именно такой отдых (слой «факт» для «Почему так»). */
+export function explainRest(ex: Pick<Exercise, 'restSec'> | null | undefined, defaultRestSec: number): Why {
+  const r = resolveRest(ex, defaultRestSec);
+  return r.source === 'exercise' ? { code: 'rest-exercise', sec: r.sec } : { code: 'rest-settings', sec: r.sec };
+}
+
 export function formatRest(sec: number): string {
   const s = Math.max(0, Math.round(sec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;

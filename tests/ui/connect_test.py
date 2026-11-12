@@ -33,7 +33,7 @@ with sync_playwright() as p:
 
     pg.click("button:has-text('Настроить подключение')")
     pg.wait_for_selector("[role=dialog] [role=tablist]")
-    check("три способа подключения", pg.locator("[role=tab]").count() == 3)
+    check("три способа подключения", pg.locator("[role=dialog] [role=tab]").count() == 3)
 
     # --- облако (на ПК по умолчанию открывается Ollama) ---
     pg.click("[role=tab]:has-text('Облако')")

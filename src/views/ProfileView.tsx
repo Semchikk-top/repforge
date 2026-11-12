@@ -20,6 +20,7 @@ import { useSyncBadge } from '../sync/useSyncBadge';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
 import { SocialSection } from './SocialSection';
+import { MarksCard } from './MarksCard';
 
 type Tab = 'overview' | 'awards' | 'shop' | 'friends';
 const TABS: [Tab, string][] = [['overview', 'Обзор'], ['awards', 'Награды'], ['shop', 'Магазин'], ['friends', 'Друзья']];
@@ -68,6 +69,7 @@ export function ProfileView({ initialTab }: { initialTab?: string }) {
 
       <div key={tab} className="profile-body">
         {tab === 'overview' && <Overview stats={stats} workouts={workouts} xp={g.xp} earned={g.earned} spent={g.spent} unlocked={g.unlocked} onAwards={() => setTab('awards')} />}
+        {tab === 'overview' && <MarksCard />}
         {tab === 'awards' && <Awards stats={stats} unlocked={g.unlocked} />}
         {tab === 'shop' && <Shop />}
         {tab === 'friends' && <SocialSection />}

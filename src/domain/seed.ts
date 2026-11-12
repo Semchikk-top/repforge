@@ -33,7 +33,28 @@ const RAW: { name: string; muscle: MuscleGroup; equipment: string }[] = [
   { name: 'Бег', muscle: 'cardio', equipment: 'Улица, дорожка' },
   // новые стартовые упражнения только в конец: id зависят от порядка
   { name: 'Ходьба', muscle: 'cardio', equipment: 'Улица, дорожка' },
-  { name: 'Велосипед', muscle: 'cardio', equipment: 'Улица, велотренажёр' }
+  { name: 'Велосипед', muscle: 'cardio', equipment: 'Улица, велотренажёр' },
+  // 1.5.0: силовые упражнения seed-033…seed-052
+  { name: 'Жим гантелей лёжа', muscle: 'chest', equipment: 'Гантели' },
+  { name: 'Жим штанги на наклонной скамье', muscle: 'chest', equipment: 'Штанга' },
+  { name: 'Сведение рук в тренажёре', muscle: 'chest', equipment: 'Тренажёр' },
+  { name: 'Тяга Т-грифа', muscle: 'back', equipment: 'Штанга' },
+  { name: 'Тяга в тренажёре сидя', muscle: 'back', equipment: 'Тренажёр' },
+  { name: 'Гиперэкстензия', muscle: 'back', equipment: 'Тренажёр' },
+  { name: 'Болгарские выпады', muscle: 'legs', equipment: 'Гантели' },
+  { name: 'Фронтальные приседания', muscle: 'legs', equipment: 'Штанга' },
+  { name: 'Гоблет-приседания', muscle: 'legs', equipment: 'Гантели' },
+  { name: 'Зашагивания на платформу', muscle: 'glutes', equipment: 'Гантели' },
+  { name: 'Жим Арнольда', muscle: 'shoulders', equipment: 'Гантели' },
+  { name: 'Махи гантелей в наклоне', muscle: 'shoulders', equipment: 'Гантели' },
+  { name: 'Обратные разведения в тренажёре', muscle: 'shoulders', equipment: 'Тренажёр' },
+  { name: 'Подъём гантелей на бицепс', muscle: 'biceps', equipment: 'Гантели' },
+  { name: 'Сгибание рук на скамье Скотта', muscle: 'biceps', equipment: 'Штанга' },
+  { name: 'Разгибание руки из-за головы', muscle: 'triceps', equipment: 'Гантели' },
+  { name: 'Жим лёжа узким хватом', muscle: 'triceps', equipment: 'Штанга' },
+  { name: 'Боковая планка', muscle: 'core', equipment: 'Свой вес' },
+  { name: 'Ролик для пресса', muscle: 'core', equipment: 'Ролик' },
+  { name: 'Подъём на носки сидя', muscle: 'calves', equipment: 'Тренажёр' }
 ];
 
 // Id стартовых упражнений одинаковы на всех устройствах — иначе после синхронизации появились бы дубли.

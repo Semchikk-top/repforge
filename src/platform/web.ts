@@ -1,7 +1,8 @@
 import type {
   BackupStoreApi, ScannerApi, FilesApi, GeoApi, GeoErrorKind, HapticsApi, HeartRateApi, LifecycleApi, NotificationsApi, NotifyOptions, NotifyPermission,
-  Platform, SecureStorageApi, SpeechApi, WakeLockApi
+  Platform, SecureStorageApi, SpeechApi, WakeLockApi, AudioStoreApi
 } from './types';
+import { createHtmlAudioPlayer } from './audio';
 
 // Реализация для браузера и PWA: ровно те вызовы, которые раньше были разбросаны по приложению.
 
@@ -161,10 +162,49 @@ export const webScanner: ScannerApi = {
   async scanQr() { return null; }
 };
 
+// Готовые фразы Fish в браузере лежат в Cache Storage: он переживает перезапуск страницы и не мешает кэшу сервис-воркера.
+const TTS_CACHE = 'repforge-tts-v1';
+const ttsReq = (name: string) => new Request(`https://tts.invalid/__tts/${encodeURIComponent(name)}`); // ключ, не настоящий адрес: запросов по нему нет
+
+export function createWebAudioStore(): AudioStoreApi {
+  const ok = () => typeof caches !== 'undefined';
+  return {
+    get available() { return ok(); },
+    async put(name, data) {
+      if (!ok()) throw new Error('Хранилище недоступно');
+      const c = await caches.open(TTS_CACHE);
+      await c.put(ttsReq(name), new Response(data, { headers: { 'content-type': data.type || 'audio/mpeg', 'content-length': String(data.size) } }));
+    },
+    async has(name) { return ok() && !!(await (await caches.open(TTS_CACHE)).match(ttsReq(name))); },
+    async open(name) {
+      if (!ok()) return null;
+      const res = await (await caches.open(TTS_CACHE)).match(ttsReq(name));
+      if (!res) return null;
+      const url = URL.createObjectURL(await res.blob());
+      return { url, release: () => URL.revokeObjectURL(url) };
+    },
+    async remove(name) { if (ok()) await (await caches.open(TTS_CACHE)).delete(ttsReq(name)); },
+    async list() {
+      if (!ok()) return [];
+      const c = await caches.open(TTS_CACHE);
+      const out = [];
+      for (const req of await c.keys()) {
+        const res = await c.match(req);
+        out.push({ name: decodeURIComponent(new URL(req.url).pathname.replace(/^\/__tts\//, '')), bytes: Number(res?.headers.get('content-length') ?? 0) });
+      }
+      return out;
+    }
+  };
+}
+
+export const webAudioStore: AudioStoreApi = createWebAudioStore();
+export const webAudioPlayer = createHtmlAudioPlayer();
+
 export function createWebPlatform(version: string): Platform {
   return {
     info: { native: false, os: 'web', version },
     geo: webGeo, notifications: webNotifications, wakeLock: webWakeLock, haptics: webHaptics,
-    lifecycle: webLifecycle, secureStorage: webSecureStorage, files: webFiles, heartRate: webHeartRate, backups: webBackups, scanner: webScanner, speech: webSpeech
+    lifecycle: webLifecycle, secureStorage: webSecureStorage, files: webFiles, heartRate: webHeartRate, backups: webBackups, scanner: webScanner, speech: webSpeech,
+    audioStore: webAudioStore, audioPlayer: webAudioPlayer
   };
 }

@@ -77,8 +77,11 @@ def wait_for(page, expr, arg=None, timeout=15000):
 
 def settings_import(pg, path):
     pg.click(".nav button:has-text('Профиль')"); pg.click("button[aria-label='Настройки']")
+    pg.click("[role=tab]:has-text('Данные')")
     pg.set_input_files("input[type=file][accept*='json']", path)
-    pg.wait_for_selector("text=Импортировано")
+    pg.click("button:has-text('Восстановить')")  # предпросмотр: в базу пишется только после подтверждения
+    pg.wait_for_selector("text=Восстановлено")
+    pg.click("[role=tab]:has-text('Общие')")
 
 
 with sync_playwright() as p:
@@ -166,6 +169,7 @@ with sync_playwright() as p:
 
     # ---------- напоминание ----------
     pg.click(".nav button:has-text('Профиль')"); pg.click("button[aria-label='Настройки']")
+    pg.click("[role=tab]:has-text('Тренировка')")
     pg.locator(".row:has-text('Напоминать о тренировке') .toggle").click()
     pg.fill("#rem-time", "00:00")
     pg.reload()
@@ -174,11 +178,12 @@ with sync_playwright() as p:
     pg.click(".reminder button:has-text('Скрыть')")
     pg.wait_for_timeout(500)  # запись «скрыто на сегодня» должна успеть сохраниться
     pg.reload()
-    pg.wait_for_selector("text=Внешний вид")
+    pg.wait_for_selector("#rem-time")
     pg.wait_for_timeout(800)
     check("скрытое напоминание не возвращается в тот же день", pg.locator(".reminder").count() == 0)
 
     # ---------- экспорт за период ----------
+    pg.click("[role=tab]:has-text('Данные')")
     pg.click("button:has-text('Экспорт за период')")
     pg.click(".chips[aria-label='Период'] .chip:has-text('30 дней')")
     with pg.expect_download() as dl:
@@ -298,6 +303,7 @@ with sync_playwright() as p:
     ca.set_offline(False)
     a.reload()  # связь вернулась: синхронизация стартует при загрузке
     a.click(".nav button:has-text('Профиль')"); a.click("button[aria-label='Настройки']")
+    a.click("[role=tab]:has-text('Сервер')")
     a.wait_for_selector("h2:has-text('Конфликты синхронизации')", timeout=25000)
     check("конфликт обнаружен и показан", "правки с устройства B" not in a.inner_text("h2:has-text('Конфликты')"))
     check("в навигации сигнал о конфликте", a.locator(".nav-badge.warn").count() == 1)

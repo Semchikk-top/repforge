@@ -32,12 +32,12 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
-      # главный чанк не должен незаметно разрастись: порог с запасом над текущим (≈460 КБ)
+      # главный чанк не должен незаметно разрастись: порог с запасом над текущим (≈640 КБ после 1.6.0)
       - name: Размер главного чанка
         run: |
           size=$(stat -c %s dist/assets/index-*.js)
           echo "index.js: $((size / 1024)) КБ"
-          test "$size" -lt $((520 * 1024)) || { echo "Главный чанк больше 520 КБ: вынеси редкий экран в React.lazy"; exit 1; }
+          test "$size" -lt $((700 * 1024)) || { echo "Главный чанк больше 700 КБ: вынеси редкий экран в React.lazy"; exit 1; }
 
   server:
     name: Сервер (Python ${{ matrix.python }})

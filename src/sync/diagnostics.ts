@@ -29,7 +29,7 @@ export interface DiagnosticsSnapshot {
   events: SyncEvent[];
 }
 
-const TABLES = ['exercises', 'workouts', 'templates', 'tracks', 'body', 'programs', 'game', 'checkins', 'friends', 'photos', 'conflicts', 'changes'] as const;
+const TABLES = ['exercises', 'workouts', 'templates', 'tracks', 'body', 'programs', 'game', 'checkins', 'learning', 'friends', 'photos', 'conflicts', 'changes'] as const;
 
 async function storageInfo(): Promise<DiagnosticsSnapshot['storage']> {
   const s = typeof navigator !== 'undefined' ? navigator.storage : undefined;

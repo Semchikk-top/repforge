@@ -38,6 +38,9 @@ const SEED_MOVEMENT: Record<string, Movement> = {
   'Жим стоя': 'vertical-press', 'Жим гантелей сидя': 'vertical-press', 'Махи гантелей в стороны': 'lateral-raise', 'Тяга к лицу': 'rear-delt',
   'Подъём штанги на бицепс': 'elbow-flexion', 'Молотки': 'elbow-flexion', 'Французский жим': 'elbow-extension', 'Разгибание на блоке': 'elbow-extension',
   'Скручивания': 'core-flexion', 'Планка': 'core-hold', 'Подъём ног в висе': 'leg-raise', 'Подъём на носки стоя': 'calf-raise',
+  // 1.5.0
+  'Жим гантелей лёжа': 'horizontal-press',
+  'Жим штанги на наклонной скамье': 'incline-press', 'Сведение рук в тренажёре': 'chest-fly', 'Тяга Т-грифа': 'horizontal-pull', 'Тяга в тренажёре сидя': 'horizontal-pull', 'Гиперэкстензия': 'hinge', 'Болгарские выпады': 'lunge', 'Фронтальные приседания': 'squat', 'Гоблет-приседания': 'squat', 'Зашагивания на платформу': 'lunge', 'Жим Арнольда': 'vertical-press', 'Махи гантелей в наклоне': 'rear-delt', 'Обратные разведения в тренажёре': 'rear-delt', 'Подъём гантелей на бицепс': 'elbow-flexion', 'Сгибание рук на скамье Скотта': 'elbow-flexion', 'Разгибание руки из-за головы': 'elbow-extension', 'Жим лёжа узким хватом': 'elbow-extension', 'Боковая планка': 'core-hold', 'Ролик для пресса': 'core-flexion', 'Подъём на носки сидя': 'calf-raise',
   // упражнения, которые создают онбординг и импорт
   'Отжимания от пола': 'push-up', 'Приседания без веса': 'squat'
 };

@@ -107,7 +107,9 @@ with sync_playwright() as p:
     page.screenshot(path="/tmp/chat_final.png")
 
     # --- ошибка провайдера показывается человеку: переключаемся на локальный (Ollama недоступна)
-    page.goto(BASE + "#/settings")
+    # Адрес локальной модели задаём заведомо закрытым портом: иначе тест зависит от запущенной Ollama на машине.
+    httpx.put(BASE + "api/assistant/config", headers={"Authorization": "Bearer " + tok}, json={"local": {"url": "http://127.0.0.1:9/v1"}})
+    page.goto(BASE + "#/settings/server")
     page.click(".seg[aria-label='Модель ассистента'] button:has-text('Ollama')")
     page.wait_for_selector("text=Ollama не отвечает", timeout=8000)
     page.goto(BASE + "#/assistant")

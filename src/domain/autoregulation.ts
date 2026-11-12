@@ -2,6 +2,7 @@
 // Ничего не меняется само: функция только предлагает, а поправку применяет явное нажатие «Сделать легче».
 // Это подсказка, а не медицинская рекомендация: каждая причина показана пользователю отдельно.
 
+import type { Why } from './explain';
 import { addDays, toDateStr } from '../lib';
 import { finished, loadRatio } from './analytics';
 import type { Readiness } from './checkin';
@@ -61,6 +62,9 @@ export interface Autoregulation {
   /** Поправка для кнопки «Сделать легче»; null в обычном режиме. */
   plan: EasePlan | null;
 }
+
+/** Причина облегчения в виде «факта» для «Почему так»: текст причины уже собран выше тем же кодом, что принял решение. */
+export const explainEaseReason = (r: EaseReason): Why => ({ code: `ease-${r.key}` as 'ease-sleep' | 'ease-readiness' | 'ease-load' | 'ease-plateau', text: r.text });
 
 const fmtRatio = (r: number): string => `${(Math.round(r * 10) / 10).toFixed(1).replace('.', ',')}×`;
 const fmtHours = (h: number): string => `${String(Math.round(h * 2) / 2).replace('.', ',')} ч`;

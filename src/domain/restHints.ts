@@ -4,6 +4,7 @@
 //    короче или длиннее настроенного. Решает человек: функция ничего не записывает.
 // Учитывается только одно и то же упражнение (exerciseId) и только отдых, измеренный по таймеру.
 
+import type { Why } from './explain';
 import { finished } from './analytics';
 import { restSamplesOf } from './setTiming';
 import { REST_MAX_SEC, REST_MIN_SEC } from './rest';
@@ -72,6 +73,12 @@ export function suggestRestChange(
   const sec = Math.min(REST_MAX_SEC, Math.max(REST_MIN_SEC, Math.round(median(avgs) / STEP_SEC) * STEP_SEC));
   if (Math.abs(sec - currentSec) < STEP_SEC) return null;
   return { sec, direction: sec > currentSec ? 'longer' : 'shorter', currentSec, avgsSec: avgs.map((x) => Math.round(x)) };
+}
+
+/** Почему предложен другой отдых (слой «факт»). */
+export function explainRestSuggestion(s: RestSuggestion): Why {
+  const avg = s.avgsSec.reduce((a, x) => a + x, 0) / s.avgsSec.length;
+  return { code: 'rest-suggest', direction: s.direction, currentSec: s.currentSec, avgSec: avg, workouts: s.avgsSec.length, sec: s.sec };
 }
 
 /** Ключ в kv, где хранится время отказа от предложения (только на этом устройстве). */

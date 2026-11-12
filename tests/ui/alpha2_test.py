@@ -113,26 +113,29 @@ with sync_playwright() as p:
 
     # --- рекорды ---
     pg.click(".nav button:has-text('Профиль')"); pg.click("button[aria-label='Настройки']")
+    pg.click("[role=tab]:has-text('Данные')")
     pg.set_input_files("input[type=file]", history_file())
-    pg.wait_for_selector("text=Импортировано", timeout=8000) if pg.locator("text=Импортировано").count() or True else None
+    pg.click("button:has-text('Восстановить')")
+    pg.wait_for_selector("text=Восстановлено", timeout=8000)
     pg.click(".nav button:has-text('Аналитика')")
     pg.click("button:has-text('Все рекорды')")
     pg.wait_for_selector("h1:has-text('Рекорды')")
     pg.wait_for_selector(".list .row:has-text('Жим штанги лёжа')", timeout=8000)
-    row = pg.locator(".list .row:has-text('Жим штанги лёжа')").first
+    strength = pg.locator(".section:has(h2:has-text('Силовые'))")
+    row = strength.locator(".list .row:has-text('Жим штанги лёжа')").first
     check("рекорд 1ПМ: ≈ 98 кг (70×12 двадцать дней назад — не «новый»)", "≈ 98" in row.inner_text() and "новый" not in row.inner_text(), row.inner_text().replace("\n", " "))
     pg.click(".chip:has-text('Вес')")
-    row = pg.locator(".list .row:has-text('Жим штанги лёжа')").first
+    row = strength.locator(".list .row:has-text('Жим штанги лёжа')").first
     check("рекорд по весу: 90 кг, свежий", "90 кг" in row.inner_text() and "новый" in row.inner_text(), row.inner_text().replace("\n", " "))
     pg.click(".chip:has-text('Объём подхода')")
-    check("объём подхода: 840 кг (70×12)", "840" in pg.locator(".list .row:has-text('Жим штанги лёжа')").first.inner_text().replace(" ", "").replace("\u00a0", ""))
-    check("подтягивания без веса — по повторениям", "10 повт." in pg.locator(".list .row:has-text('Подтягивания')").first.inner_text())
+    check("объём подхода: 840 кг (70×12)", "840" in strength.locator(".list .row:has-text('Жим штанги лёжа')").first.inner_text().replace(" ", "").replace("\u00a0", ""))
+    check("подтягивания без веса — по повторениям", "10 повт." in strength.locator(".list .row:has-text('Подтягивания')").first.inner_text())
     pg.fill("input[aria-label='Поиск']", "подтяг")
-    check("поиск фильтрует", pg.locator(".list .row").count() == 1)
+    check("поиск фильтрует", strength.locator(".list .row").count() == 1)
     pg.fill("input[aria-label='Поиск']", "")
     pg.click(".chip:has-text('Свежие')")
     pg.click(".chip:has-text('По названию')")
-    names = pg.locator(".list .row .title").all_inner_texts()
+    names = strength.locator(".list .row .title").all_inner_texts()
     check("сортировка по названию", names == sorted(names, key=str.lower) or names[0] <= names[-1], names)
     check("нет горизонтального переполнения", pg.evaluate("document.documentElement.scrollWidth") <= 390)
     check("фильтры рекордов целиком на экране", pg.evaluate("[...document.querySelectorAll('.chips.wrap .chip')].every(c => c.getBoundingClientRect().right <= 390 && c.getBoundingClientRect().left >= 0)"))

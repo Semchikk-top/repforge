@@ -34,7 +34,8 @@ import { WhatsNew } from './views/WhatsNew';
 // Редко открываемые экраны грузятся по требованию: главный чанк меньше, первый экран появляется быстрее.
 // Календарь, «Тренировка», упражнения и сама тренировка остаются в основном чанке: они нужны сразу и без сети.
 const LegalView = lazy(() => import('./views/LegalView').then((m) => ({ default: m.LegalView })));
-const SettingsView = lazy(() => import('./views/SettingsView').then((m) => ({ default: m.SettingsView })));
+const SettingsView = lazy(() => import('./views/settings/SettingsView').then((m) => ({ default: m.SettingsView })));
+const LearnView = lazy(() => import('./views/LearnView').then((m) => ({ default: m.LearnView })));
 const StatsView = lazy(() => import('./views/StatsView').then((m) => ({ default: m.StatsView })));
 const RatingsView = lazy(() => import('./views/RatingsView').then((m) => ({ default: m.RatingsView })));
 const AssistantView = lazy(() => import('./views/AssistantView').then((m) => ({ default: m.AssistantView })));
@@ -94,7 +95,7 @@ export default function App() {
     pairOnce(pairCode)
       .then(() => toast('Устройство подключено'))
       .catch((e: unknown) => toast(e instanceof Error ? e.message : 'Не удалось подключиться'))
-      .finally(() => replace('settings'));
+      .finally(() => replace('settings/server'));
   }, [ready, pairCode, toast]);
 
   // нативная оболочка: workout://pair?url=…&code=… открывает приложение и подключает устройство.
@@ -109,7 +110,7 @@ export default function App() {
       pairOnce(target.code, target.baseUrl)
         .then(() => toast('Устройство подключено'))
         .catch((e: unknown) => toast(e instanceof Error ? e.message : 'Не удалось подключиться'))
-        .finally(() => replace('settings'));
+        .finally(() => replace('settings/server'));
     });
   }, [ready, toast]);
 
@@ -132,11 +133,12 @@ export default function App() {
   }, [ready, segs]);
 
   const tab = segs[0] ?? 'calendar';
-  const navTab = tab === 'pair' || tab === 'settings' || tab === 'diagnostics' || tab === 'privacy' ? 'profile' : tab === 'records' || tab === 'ratings' ? 'stats' : tab === 'checkin' ? 'calendar' : tab === 'start' ? 'workout' : tab === 'programs' ? 'workout' : tab === 'quick' ? 'workout' : tab;
+  const navTab = tab === 'pair' || tab === 'settings' || tab === 'diagnostics' || tab === 'privacy' || tab === 'learn' ? 'profile' : tab === 'records' || tab === 'ratings' ? 'stats' : tab === 'checkin' ? 'calendar' : tab === 'start' ? 'workout' : tab === 'programs' ? 'workout' : tab === 'quick' ? 'workout' : tab;
 
   // Направление перехода: вкладка правее или экран «глубже» — въезжает справа, иначе слева
-  const level = NAV_ORDER.indexOf(navTab) * 2 + ((tab === 'workout' && segs[1]) || tab === 'records' || tab === 'ratings' || tab === 'programs' || tab === 'settings' || tab === 'diagnostics' || tab === 'privacy' ? 1 : 0);
-  const viewKey = tab + '/' + (segs[1] ?? '');
+  const level = NAV_ORDER.indexOf(navTab) * 2 + ((tab === 'workout' && segs[1]) || tab === 'records' || tab === 'ratings' || tab === 'programs' || tab === 'settings' || tab === 'diagnostics' || tab === 'privacy' || tab === 'learn' ? 1 : 0);
+  // вкладки настроек переключаются на месте, без повторного въезда экрана
+  const viewKey = tab === 'settings' ? 'settings/' : tab + '/' + (segs[1] ?? '');
   const prevLevel = useRef<number | null>(null);
   const dirRef = useRef<{ key: string; dir: 'fwd' | 'back' | 'up' }>({ key: '', dir: 'up' });
   if (dirRef.current.key !== viewKey) {
@@ -154,6 +156,7 @@ export default function App() {
   else if (tab === 'workout') view = <WorkoutHub />;
   else if (tab === 'checkin') view = <CheckInView key={segs[1]} slot={segs[1] === 'evening' ? 'evening' : 'morning'} />;
   else if (tab === 'start') view = <OnboardingView />;
+  else if (tab === 'learn') view = <LearnView segs={segs} />;
   else if (tab === 'stats') view = <StatsView />;
   else if (tab === 'records') view = <RecordsView />;
   else if (tab === 'ratings') view = <RatingsView />;

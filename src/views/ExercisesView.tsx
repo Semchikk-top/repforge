@@ -8,12 +8,15 @@ import { fieldToRest, formatRest, REST_PRESETS, restToField } from '../domain/re
 import { useSettings } from '../state/settings';
 import { Sheet } from '../ui/Sheet';
 import { useToast } from '../ui/Toast';
+import { catalog } from '../content/catalog';
+import { WhyButton, WhyCardSheet } from './WhyCardSheet';
 
 export function ExercisesView() {
   const all = useLiveQuery(() => db.exercises.toArray(), [], [] as Exercise[]);
   const [q, setQ] = useState('');
   const [muscle, setMuscle] = useState<MuscleGroup | 'all'>('all');
   const [edit, setEdit] = useState<Exercise | 'new' | null>(null);
+  const [why, setWhy] = useState<Exercise | null>(null);
 
   const list = useMemo(
     () => all.filter((e) => !e.deletedAt && (muscle === 'all' || e.muscle === muscle) && e.name.toLowerCase().includes(q.trim().toLowerCase()))
@@ -35,16 +38,23 @@ export function ExercisesView() {
         ))}
       </div>
       <div className="list">
-        {list.map((e) => (
-          <button key={e.id} className="row" onClick={() => setEdit(e)}>
-            <div className="grow">
-              <div className="title">{e.name}</div>
-              <div className="meta">{MUSCLE_LABELS[e.muscle]} · {e.equipment}{e.restSec ? ` · отдых ${formatRest(e.restSec)}` : ''}</div>
-            </div>
-          </button>
-        ))}
+        {list.map((e) => {
+          const row = (
+            <button key={e.id} className="row" onClick={() => setEdit(e)}>
+              <div className="grow">
+                <div className="title">{e.name}</div>
+                <div className="meta">{MUSCLE_LABELS[e.muscle]} · {e.equipment}{e.restSec ? ` · отдых ${formatRest(e.restSec)}` : ''}</div>
+              </div>
+            </button>
+          );
+          // кнопка ⓘ рядом со строкой, а не внутри неё: вложенные кнопки недопустимы
+          return !e.custom && catalog.has(e.id)
+            ? <div key={e.id} className="row-split">{row}<WhyButton exerciseId={e.id} name={e.name} onOpen={() => setWhy(e)} /></div>
+            : row;
+        })}
         {list.length === 0 && <p className="empty">Ничего не найдено.</p>}
       </div>
+      {why && <WhyCardSheet exerciseId={why.id} name={why.name} onClose={() => setWhy(null)} />}
       {edit && <ExerciseSheet exercise={edit === 'new' ? null : edit} onClose={() => setEdit(null)} />}
     </div>
   );

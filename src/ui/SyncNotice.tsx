@@ -24,7 +24,7 @@ export function SyncNotice() {
   return (
     <div className="reminder" role="alert">
       <span>{text}</span>
-      <button className="btn small primary" onClick={() => go('settings')}>Подробнее</button>
+      <button className="btn small primary" onClick={() => go('settings/server')}>Подробнее</button>
       <button className="btn small ghost" onClick={() => setHidden((h) => ({ ...h, [key]: true }))}>Скрыть</button>
     </div>
   );

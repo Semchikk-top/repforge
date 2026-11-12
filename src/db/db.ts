@@ -1,5 +1,5 @@
 import Dexie, { type Table } from 'dexie';
-import type { BodyEntry, ChangeRecord, CheckIn, ConflictRecord, Exercise, Photo, Program, Template, Track, Workout } from '../domain/types';
+import type { BodyEntry, ChangeRecord, CheckIn, ConflictRecord, Exercise, LearningAttempt, Photo, Program, Template, Track, Workout } from '../domain/types';
 import { SEED_EXERCISES } from '../domain/seed';
 import type { Friend, PeerSnapshotRow, ProfileRow } from '../social/types';
 import type { GameRow } from '../game/types';
@@ -36,6 +36,7 @@ class AppDB extends Dexie {
   game!: Table<GameRow, string>;
   // Чек-ины самочувствия (0.8): синхронизируются, один слот на дату
   checkins!: Table<CheckIn, string>;
+  learning!: Table<LearningAttempt, string>;
   // Общий предок для слияния тренировок (0.11): какой версию записи отдал сервер в последний раз. Только на устройстве.
   bases!: Table<SyncBase, string>;
 
@@ -96,6 +97,7 @@ class AppDB extends Dexie {
     this.version(8).stores({ checkins: 'id, date, [date+slot], updatedAt' });
     // v9: общие предки для слияния тренировок по подходам (0.11)
     this.version(9).stores({ bases: 'id, at' });
+    this.version(10).stores({ learning: 'id, courseId, updatedAt' }); // 1.5.0: попытки тестов курсов
   }
 }
 

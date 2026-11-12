@@ -764,3 +764,63 @@ button.av { cursor: pointer; }
 .laps { display: grid; gap: 4px; margin: 8px 0; font-size: 15px; }
 .laps .lap { display: flex; gap: 10px; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .laps .lap .grow { flex: 1; }
+
+/* карточки «Зачем это» (1.3.0) */
+.info-btn { position: relative; width: 28px; height: 28px; margin-left: 6px; vertical-align: middle; border: 0; border-radius: 50%; background: transparent; color: var(--muted); display: inline-grid; place-items: center; padding: 0; }
+.info-btn::after { content: ''; position: absolute; inset: -8px; } /* зона нажатия 44×44 */
+.info-btn:active { color: var(--accent); }
+.row-split { display: flex; align-items: center; border-bottom: 1px solid var(--line); }
+.row-split .row { border-bottom: 0; flex: 1; min-width: 0; }
+.row-split .info-btn { margin: 0 8px 0 0; flex: none; }
+.list > .row-split { animation: rise 0.26s cubic-bezier(0.22, 0.9, 0.3, 1) backwards; }
+.row-split:last-child { border-bottom: 0; }
+.why-card h3.why-name { font-family: var(--font-display); font-size: 24px; font-weight: 600; margin: 0 0 6px; }
+.why-card h4 { margin: 18px 0 6px; font-size: 13px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--muted); }
+.why-card p { margin: 6px 0; line-height: 1.4; }
+.why-card .why-summary { font-size: 16px; }
+.why-list { margin: 4px 0; padding-left: 20px; }
+.why-list li { margin: 4px 0; line-height: 1.35; }
+.why-draft { color: var(--rest); font-size: 14px; border: 1px dashed var(--rest); border-radius: 10px; padding: 8px 10px; }
+.why-foot { margin-top: 20px; padding-top: 10px; border-top: 1px solid var(--line); }
+.why-foot p { font-size: 12px; color: var(--muted); margin: 4px 0; }
+.why-foot .link-btn { font-size: 12px; }
+.why-sources { margin-top: 8px; }
+.why-sources li { margin: 6px 0; font-size: 14px; }
+
+/* «Почему так» (1.4.0) */
+.why-fact { font-size: 16px; }
+.why-principle { margin-top: 14px; padding-top: 4px; border-top: 1px solid var(--line); }
+.why-principle h4 { margin-top: 12px; }
+.ease-head .info-btn { margin-left: 8px; }
+
+/* карта нагрузки (1.4.0) */
+.body-map { display: flex; justify-content: center; gap: 12px; margin: 4px 0; }
+.body-map figure { margin: 0; flex: 0 1 160px; text-align: center; }
+.body-map figcaption { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.body-fig { width: 100%; height: auto; display: block; }
+
+/* раздел «Знания» (1.5.0): спокойное оформление, без наград */
+.learn-back { display: inline-flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.learn-course, .learn-lesson { width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--line); color: inherit; font: inherit; cursor: pointer; }
+.lesson-body p { margin: 0 0 12px; line-height: 1.55; font-size: 16px; }
+.learn-mark { margin: 10px 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; }
+.learn-score { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+.learn-review { padding: 12px 0; border-bottom: 1px solid var(--line); }
+.learn-review p { margin: 0 0 4px; }
+.quiz-q { border: 0; margin: 0 0 12px; padding: 0; }
+.quiz-q legend { padding: 0; margin-bottom: 10px; font-size: 17px; line-height: 1.4; }
+.quiz-opt { display: block; width: 100%; text-align: left; min-height: 48px; margin-bottom: 8px; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--line); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.quiz-opt.on { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: -2px; font-weight: 600; }
+.learn-more { margin-top: 12px; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.learn-more h4 { margin: 0 0 2px; }
+
+/* вкладки настроек: одна строка с горизонтальной прокруткой */
+.settings-tabs { display: flex; gap: 8px; overflow-x: auto; margin: 12px -16px 16px; padding: 0 16px 4px; scrollbar-width: none; }
+.settings-tabs::-webkit-scrollbar { display: none; }
+.settings-tabs .chip { white-space: nowrap; }
+
+/* озвучка: полоса прогресса подготовки */
+.tts-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; margin-top: 8px; }
+.tts-bar > i { display: block; height: 100%; background: var(--accent); transition: width 0.25s linear; }
+/* запас снизу: плавающая кнопка ассистента не должна закрывать последний элемент короткой вкладки */
+#settings-panel { padding-bottom: 104px; }

@@ -13,6 +13,7 @@ const current = (): string => (typeof __APP_VERSION__ === 'string' ? __APP_VERSI
 export function WhatsNew({ ready }: { ready: boolean }) {
   const [entries, setEntries] = useState<WhatsNewEntry[]>([]);
   const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
     if (!ready) return;
@@ -29,8 +30,10 @@ export function WhatsNew({ ready }: { ready: boolean }) {
     return () => { alive = false; };
   }, [ready]);
 
-  const dismiss = () => { setEntries([]); setOpen(false); void db.kv.put({ key: KEY, value: current() }); };
-  if (!entries.length) return null;
+  const dismiss = () => { setEntries([]); setOpen(false); setSelected(null); void db.kv.put({ key: KEY, value: current() }); };
+  const active = entries.find((e) => e.version === selected) ?? entries[0];
+  if (!entries.length || !active) return null;
+  const many = entries.length > 1;
   return (
     <>
       <div className="reminder" role="status">
@@ -39,14 +42,21 @@ export function WhatsNew({ ready }: { ready: boolean }) {
         <button className="btn small ghost" onClick={dismiss}>Скрыть</button>
       </div>
       {open && (
-        <Sheet title={`Что нового в ${current()}`} onClose={dismiss}>
-          {entries.map((e) => (
-            <section key={e.version} style={{ marginBottom: 14 }}>
-              <h3 style={{ margin: '0 0 6px' }}>{e.version}: {e.title}</h3>
-              <ul style={{ paddingLeft: 18, margin: 0, display: 'grid', gap: 6 }}>{e.items.map((t) => <li key={t}>{t}</li>)}</ul>
-            </section>
-          ))}
-          <button className="btn block" onClick={dismiss}>Понятно</button>
+        <Sheet title="Что нового" onClose={dismiss}>
+          {many && (
+            <div className="settings-tabs" role="tablist" aria-label="Версии">
+              {entries.map((e) => (
+                <button key={e.version} role="tab" id={`wn-tab-${e.version}`} aria-selected={active.version === e.version}
+                  aria-controls="whats-new-panel" className={'chip' + (active.version === e.version ? ' on' : '')}
+                  onClick={() => setSelected(e.version)}>{e.version}</button>
+              ))}
+            </div>
+          )}
+          <section id="whats-new-panel" role="tabpanel" {...(many ? { 'aria-labelledby': `wn-tab-${active.version}` } : {})}>
+            <h3 style={{ margin: '0 0 6px' }}>{active.version}: {active.title}</h3>
+            <ul style={{ paddingLeft: 18, margin: 0, display: 'grid', gap: 6 }}>{active.items.map((t) => <li key={t}>{t}</li>)}</ul>
+          </section>
+          <button className="btn block" style={{ marginTop: 14 }} onClick={dismiss}>Понятно</button>
         </Sheet>
       )}
     </>

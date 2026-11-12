@@ -7,6 +7,8 @@ import sqlite3
 from datetime import date, timedelta
 from typing import Any
 
+from . import content
+
 MUSCLES = ["chest", "back", "legs", "glutes", "shoulders", "biceps", "triceps", "core", "calves", "forearms", "cardio"]
 
 TOOLS: list[dict[str, Any]] = [
@@ -71,6 +73,23 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "get_exercise_card",
+        "description": (
+            "Справочник приложения: карточка стартового упражнения («Зачем это»): суть, какие мышцы работают, подсказки по технике, "
+            "типичные ошибки, чем заменить, источники. Используй для ЛЮБОГО теоретического вопроса об упражнении. "
+            "Если карточки нет, инструмент скажет об этом: передай это пользователю."
+        ),
+        "input_schema": {"type": "object", "properties": {"name": {"type": "string", "description": "Название упражнения, например 'румынская тяга'"}}, "required": ["name"]},
+    },
+    {
+        "name": "get_principle",
+        "description": (
+            "Справочник приложения: короткая заметка-принцип («Почему так»): прогрессивная нагрузка, отдых между подходами, запас повторений, "
+            "разминка, восстановление и т. п. Используй для теоретических вопросов о тренировке вообще. Без id вернёт список доступных."
+        ),
+        "input_schema": {"type": "object", "properties": {"id": {"type": "string", "description": "id или часть названия, например 'rest-between-sets' или 'отдых'"}}},
+    },
+    {
         "name": "propose_workout",
         "description": (
             "Предложить пользователю тренировку на конкретную дату. Она НЕ добавляется сама: пользователь увидит карточку и подтвердит. "
@@ -109,6 +128,8 @@ TOOL_LABELS = {
     "get_cardio_history": "Смотрю кардио",
     "get_planned_workouts": "Смотрю план",
     "list_exercises": "Смотрю справочник упражнений",
+    "get_exercise_card": "Смотрю справочник упражнений приложения",
+    "get_principle": "Смотрю справочник принципов",
     "propose_workout": "Составляю тренировку",
 }
 
@@ -341,6 +362,12 @@ class DataAccess:
         ]
         rows.sort(key=lambda r: str(r["name"]))
         return {"exercises": rows[:60], "total": len(rows)}
+
+    def get_exercise_card(self, name: str = "") -> dict[str, Any]:
+        return content.get_exercise_card(name)
+
+    def get_principle(self, id: str = "") -> dict[str, Any]:  # noqa: A002 (имя параметра задано схемой инструмента)
+        return content.get_principle(id)
 
     def execute(self, name: str, args: dict[str, Any]) -> str:
         fn = getattr(self, name, None)

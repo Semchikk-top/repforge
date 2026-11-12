@@ -22,7 +22,9 @@ export const platform: Platform = {
   get heartRate() { return current.heartRate; },
   get backups() { return current.backups; },
   get scanner() { return current.scanner; },
-  get speech() { return current.speech; }
+  get speech() { return current.speech; },
+  get audioStore() { return current.audioStore; },
+  get audioPlayer() { return current.audioPlayer; }
 };
 
 export const isNative = (): boolean => current.info.native;

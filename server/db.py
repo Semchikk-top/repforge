@@ -19,7 +19,7 @@ from .version import SCHEMA_VERSION
 DATA_DIR = Path(os.environ.get("WORKOUT_DATA_DIR", Path(__file__).resolve().parent.parent / "data"))
 DB_PATH = DATA_DIR / "workout.db"
 
-ALLOWED_TABLES = {"exercises", "workouts", "templates", "tracks", "body", "programs", "profile", "game", "checkins"}
+ALLOWED_TABLES = {"exercises", "workouts", "templates", "tracks", "body", "programs", "profile", "game", "checkins", "learning"}
 CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # без похожих символов
 CODE_TTL_SEC = 10 * 60
 # Сколько отозванное устройство остаётся в списке и доступно для восстановления; потом карточка исчезает.
@@ -147,7 +147,11 @@ class SchemaTooNew(RuntimeError):
 
 # Миграции схемы: ключ — версия, К которой приводит функция. Каждая работает внутри одной транзакции.
 # Новая версия схемы = новая функция здесь + увеличенный SCHEMA_VERSION в version.py.
-MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {}
+def _migrate_2(conn: sqlite3.Connection) -> None:
+    """1.5.0: таблица `learning`. Записи хранятся в общей `entities`, DDL не нужен; шаг отмечает границу, за которую назад не вернуться."""
+
+
+MIGRATIONS: dict[int, Callable[[sqlite3.Connection], None]] = {2: _migrate_2}
 
 
 def schema_version(conn: sqlite3.Connection) -> int:
@@ -357,14 +361,14 @@ def apply_entities(conn: sqlite3.Connection, items: Iterable[dict[str, Any]]) ->
     return accepted
 
 
-def entities_since(conn: sqlite3.Connection, since: int, exclude: set[tuple[str, str]], limit: int = 2000) -> tuple[list[dict[str, Any]], bool, int]:
+def entities_since(conn: sqlite3.Connection, since: int, exclude: set[tuple[str, str]], limit: int = 2000, tables: set[str] | None = None) -> tuple[list[dict[str, Any]], bool, int]:
     rows = conn.execute("SELECT * FROM entities WHERE seq > ? ORDER BY seq LIMIT ?", (since, limit + 1)).fetchall()
     more = len(rows) > limit
     page = rows[:limit]
     last_seq = page[-1]["seq"] if page else since
     out = []
     for r in page:
-        if (r["table_name"], r["id"]) in exclude:
+        if (r["table_name"], r["id"]) in exclude or (tables is not None and r["table_name"] not in tables):
             continue
         out.append(
             {

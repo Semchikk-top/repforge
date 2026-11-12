@@ -12,6 +12,7 @@ LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1"}
 BODY_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 MAX_BODY = 16 * 1024 * 1024      # синхронизация: до 500 записей за раз
 MAX_BODY_SMALL = 256 * 1024      # всё остальное
+MAX_BODY_VOICE = 12 * 1024 * 1024 + 4096  # загрузка образца голоса (base64 до 8 МБ звука)
 
 def relay_source(url: str | None) -> str:
     """Источник для connect-src из адреса релея комнаты «Рядом»: только ws:// и wss:// с именем хоста, без пути и логина.
@@ -89,6 +90,7 @@ def map_sources(raw: str | None) -> tuple[str, ...]:
     return tuple(out)
 
 
+# media-src blob: — озвучка Fish из локального кеша PWA проигрывается через object URL; на скрипты и сеть это не влияет.
 def build_csp(relay_url: str | None = None, board_url: str | None = None, map_origins: tuple[str, ...] | list[str] = ()) -> str:
     connect = "'self'" + (f" {relay_source(relay_url)}" if relay_source(relay_url) else "") + (f" {board_source(board_url)}" if board_source(board_url) else "")
     for src in map_origins:
@@ -96,7 +98,7 @@ def build_csp(relay_url: str | None = None, board_url: str | None = None, map_or
         if checked and checked not in connect.split():
             connect += f" {checked}"
     return (
-        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; "
+        "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; media-src 'self' blob:; "
         f"font-src 'self' data:; connect-src {connect}; manifest-src 'self'; worker-src 'self'; "
         "object-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
     )
@@ -231,7 +233,7 @@ class SecurityMiddleware:
             length = h.get("content-length")
             if length is None and "transfer-encoding" in h:
                 return await self._reject(send, 411, "Нужен Content-Length", cors)
-            limit = MAX_BODY if path == "/api/sync" else MAX_BODY_SMALL
+            limit = MAX_BODY if path == "/api/sync" else MAX_BODY_VOICE if path == "/api/tts/voices" else MAX_BODY_SMALL
             try:
                 if length is not None and int(length) > limit:
                     return await self._reject(send, 413, "Запрос слишком большой", cors)

@@ -4,7 +4,7 @@ import { DEFAULT_SETTINGS, type Settings } from '../domain/types';
 import { db } from './db';
 
 export const BACKUP_FORMAT = 1;
-export const BACKUP_TABLES = ['exercises', 'workouts', 'templates', 'body', 'programs', 'game', 'checkins', 'tracks'] as const;
+export const BACKUP_TABLES = ['exercises', 'workouts', 'templates', 'body', 'programs', 'game', 'checkins', 'tracks', 'learning'] as const;
 export type BackupTable = (typeof BACKUP_TABLES)[number];
 
 export interface BackupRow { id: string; updatedAt: number; [k: string]: unknown }
@@ -30,6 +30,7 @@ function rowProblem(table: BackupTable, r: unknown): string | null {
   if (typeof r.updatedAt !== 'number' || !Number.isFinite(r.updatedAt)) return 'нет времени изменения';
   if (table === 'workouts' && (typeof r.date !== 'string' || !Array.isArray(r.exercises))) return 'нет даты или упражнений';
   if (table === 'checkins' && r.slot !== 'morning' && r.slot !== 'evening') return 'неизвестный слот';
+  if (table === 'learning' && (typeof r.courseId !== 'string' || typeof r.passed !== 'boolean' || typeof r.correct !== 'number' || typeof r.total !== 'number' || r.total <= 0)) return 'неполная попытка теста';
   return null;
 }
 

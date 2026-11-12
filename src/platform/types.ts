@@ -119,6 +119,25 @@ export interface SpeechApi {
   stop(): Promise<void>;
 }
 
+/** Локальное хранилище готовых аудиофайлов озвучки (Fish): в оболочке — Directory.Data/tts, в браузере — Cache Storage. */
+export interface AudioFileInfo { name: string; bytes: number }
+export interface AudioHandle { url: string; /** Освободить временный адрес (object URL в браузере). */ release(): void }
+export interface AudioStoreApi {
+  readonly available: boolean;
+  put(name: string, data: Blob): Promise<void>;
+  has(name: string): Promise<boolean>;
+  /** Адрес для воспроизведения локального файла; null — файла нет. Сети не касается. */
+  open(name: string): Promise<AudioHandle | null>;
+  remove(name: string): Promise<void>;
+  list(): Promise<AudioFileInfo[]>;
+}
+
+export interface AudioPlayerApi {
+  /** Играет файл по адресу. 'ended' — доиграл или оборвали; 'failed' — звук не пошёл (тогда вызывающий говорит системным голосом). */
+  play(url: string): Promise<'ended' | 'failed'>;
+  stop(): Promise<void>;
+}
+
 export interface AppInfo { native: boolean; os: 'android' | 'ios' | 'web'; version: string }
 
 export interface Platform {
@@ -134,4 +153,6 @@ export interface Platform {
   backups: BackupStoreApi;
   scanner: ScannerApi;
   speech: SpeechApi;
+  audioStore: AudioStoreApi;
+  audioPlayer: AudioPlayerApi;
 }

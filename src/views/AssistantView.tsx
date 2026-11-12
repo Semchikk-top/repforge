@@ -204,7 +204,7 @@ export function AssistantView() {
                 {m.error && (
                   <div className="msg-error" role="alert">
                     <div>{m.error}</div>
-                    {/не настроен|недоступна|подключ/i.test(m.error) && <button className="btn small" style={{ marginTop: 8 }} onClick={() => go('settings')}>Открыть настройки</button>}
+                    {/не настроен|недоступна|подключ/i.test(m.error) && <button className="btn small" style={{ marginTop: 8 }} onClick={() => go('settings/server')}>Открыть настройки</button>}
                   </div>
                 )}
               </>

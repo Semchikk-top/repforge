@@ -34,7 +34,7 @@ const mapOrigins = [...new Set([
 ])];
 const map = mapOrigins.map((o) => ` ${o}`).join('');
 const csp = [
-  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "font-src 'self' data:",
+  "default-src 'self'", "script-src 'self'", "style-src 'self' 'unsafe-inline'", "img-src 'self' data:", "media-src 'self' blob:", "font-src 'self' data:",
   `connect-src 'self'${relay}${board}${map}`, "manifest-src 'self'", "worker-src 'self'", "object-src 'none'", "base-uri 'none'", "form-action 'self'", "frame-ancestors 'none'"
 ].join('; ');
 

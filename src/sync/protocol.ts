@@ -1,7 +1,7 @@
 // Версия протокола синхронизации: на каком «языке» приложение разговаривает с сервером.
 // Должна совпадать по смыслу с PROTOCOL_VERSION в server/version.py. Растёт только тогда, когда старая
 // сторона не сможет корректно работать с новой (изменились поля запроса/ответа или набор таблиц).
-export const PROTOCOL_VERSION = 1;
+export const PROTOCOL_VERSION = 2;
 
 export type Incompat = 'client_outdated' | 'server_outdated';
 

@@ -1,4 +1,5 @@
 import { finished } from './analytics';
+import type { Why } from './explain';
 import type { Workout } from './types';
 
 export type SuggestionKind = 'add-reps' | 'add-weight' | 'hold' | 'deload' | 'comeback';
@@ -30,9 +31,9 @@ function sessionsOf(history: Workout[], exerciseId: string, excludeId?: string):
 
 const daysBetween = (a: string, b: Date) => Math.floor((b.getTime() - new Date(a + 'T00:00:00').getTime()) / 86400000);
 
-/** Подсказка по прошлым тренировкам: двойная прогрессия с поправкой на RPE, перерыв и усталость. Это идея, а не требование.
- *  today нужен только для правила «после перерыва»: без него оно не применяется. */
-export function suggestNext(history: Workout[], exerciseId: string, step: number, excludeId?: string, today?: Date): Suggestion | null {
+interface Decision { suggestion: Suggestion; why: Why }
+
+function decide(history: Workout[], exerciseId: string, step: number, excludeId?: string, today?: Date): Decision | null {
   const sessions = sessionsOf(history, exerciseId, excludeId);
   const last = sessions[sessions.length - 1];
   if (!last || !Number.isFinite(last.minReps) || last.minReps <= 0) return null;
@@ -41,25 +42,38 @@ export function suggestNext(history: Workout[], exerciseId: string, step: number
   if (today && work > 0) {
     const gap = daysBetween(last.date, today);
     if (gap > COMEBACK_DAYS) {
-      return { weight: toStep(work * 0.9, step), reps: minReps, kind: 'comeback', reason: `Перерыв ${Math.round(gap / 7)} нед.: начни с ~90% веса и вернись к рабочему за одну-две тренировки` };
+      const weight = toStep(work * 0.9, step);
+      return { suggestion: { weight, reps: minReps, kind: 'comeback', reason: `Перерыв ${Math.round(gap / 7)} нед.: начни с ~90% веса и вернись к рабочему за одну-две тренировки` }, why: { code: 'next-comeback', weeks: Math.round(gap / 7), weight } };
     }
   }
 
   const [s2, s1] = [sessions[sessions.length - 3], sessions[sessions.length - 2]];
   if (work > 0 && s1 && s2 && s1.work === work && s2.work === work && minReps < s1.minReps && s1.minReps < s2.minReps) {
-    return { weight: toStep(work * 0.9, step), reps: s2.minReps, kind: 'deload', reason: 'Повторы падают две тренировки подряд при том же весе: возьми разгрузку, −10% веса' };
+    const weight = toStep(work * 0.9, step);
+    return { suggestion: { weight, reps: s2.minReps, kind: 'deload', reason: 'Повторы падают две тренировки подряд при том же весе: возьми разгрузку, −10% веса' }, why: { code: 'next-deload', weight: work, reps: s2.minReps } };
   }
 
   if (avgRpe !== null && avgRpe >= 9.5) {
-    return { weight: work, reps: minReps, kind: 'hold', reason: 'Прошлый раз было на пределе (RPE 9,5+): повтори тот же результат, не прибавляй' };
+    return { suggestion: { weight: work, reps: minReps, kind: 'hold', reason: 'Прошлый раз было на пределе (RPE 9,5+): повтори тот же результат, не прибавляй' }, why: { code: 'next-hold-rpe', rpe: avgRpe } };
   }
 
   const easy = avgRpe !== null && avgRpe <= 7;
   if (work > 0 && minReps >= TOP_REPS) {
     return easy
-      ? { weight: round(work + 2 * step), reps: RESET_REPS, kind: 'add-weight', reason: `Было легко (RPE ${round(avgRpe!)}) и ${minReps}+ повторений: можно прибавить сразу два шага` }
-      : { weight: round(work + step), reps: RESET_REPS, kind: 'add-weight', reason: `Во всех подходах было ${minReps}+ повторений: пора прибавить вес` };
+      ? { suggestion: { weight: round(work + 2 * step), reps: RESET_REPS, kind: 'add-weight', reason: `Было легко (RPE ${round(avgRpe!)}) и ${minReps}+ повторений: можно прибавить сразу два шага` }, why: { code: 'next-add-weight', reps: minReps, steps: 2, rpe: avgRpe } }
+      : { suggestion: { weight: round(work + step), reps: RESET_REPS, kind: 'add-weight', reason: `Во всех подходах было ${minReps}+ повторений: пора прибавить вес` }, why: { code: 'next-add-weight', reps: minReps, steps: 1, rpe: avgRpe } };
   }
-  if (easy && work > 0 && minReps + 2 <= TOP_REPS) return { weight: work, reps: minReps + 2, kind: 'add-reps', reason: `Было легко (RPE ${round(avgRpe!)}): добавь два повтора` };
-  return { weight: work, reps: minReps + 1, kind: 'add-reps', reason: 'Добавь один повтор к прошлому разу' };
+  if (easy && work > 0 && minReps + 2 <= TOP_REPS) return { suggestion: { weight: work, reps: minReps + 2, kind: 'add-reps', reason: `Было легко (RPE ${round(avgRpe!)}): добавь два повтора` }, why: { code: 'next-add-reps', add: 2, rpe: avgRpe } };
+  return { suggestion: { weight: work, reps: minReps + 1, kind: 'add-reps', reason: 'Добавь один повтор к прошлому разу' }, why: { code: 'next-add-reps', add: 1, rpe: avgRpe } };
+}
+
+/** Подсказка по прошлым тренировкам: двойная прогрессия с поправкой на RPE, перерыв и усталость. Это идея, а не требование.
+ *  today нужен только для правила «после перерыва»: без него оно не применяется. */
+export function suggestNext(history: Workout[], exerciseId: string, step: number, excludeId?: string, today?: Date): Suggestion | null {
+  return decide(history, exerciseId, step, excludeId, today)?.suggestion ?? null;
+}
+
+/** Почему предложено именно это: причина из того же вычисления, что и сама подсказка (слой «факт»). */
+export function explainNext(history: Workout[], exerciseId: string, step: number, excludeId?: string, today?: Date): Why | null {
+  return decide(history, exerciseId, step, excludeId, today)?.why ?? null;
 }

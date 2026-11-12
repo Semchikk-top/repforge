@@ -17,6 +17,9 @@ import { BarChart, HBars, LineChart } from '../ui/Charts';
 import { CountUp } from '../ui/CountUp';
 import { Heatmap } from '../ui/Heatmap';
 import { MuscleLoadTable, RoseChart } from '../ui/RoseChart';
+import { BodyMap, BodyMapTable } from '../ui/BodyMap';
+import { loadMap, cardWeights, MAP_PERIODS, type MapPeriod, type WeightResolver } from '../domain/loadMap';
+import { catalog } from '../content/catalog';
 import { checkInSeries, seriesAverage, type SeriesMetric } from '../domain/checkin';
 
 const shortDate = (s: string) => parseDate(s).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
@@ -175,6 +178,34 @@ function MuscleLoadSection({ workouts, exMap }: { workouts: Workout[]; exMap: Ma
   );
 }
 
+/** Из карточки справочника берутся основные и вспомогательные мышцы; без карточки подход идёт в группу упражнения. */
+const resolveWeights: WeightResolver = (ex) => {
+  const card = catalog.card(ex.id);
+  return card ? cardWeights(card, catalog.groupOf) : null;
+};
+
+function LoadMapSection({ workouts, exMap }: { workouts: Workout[]; exMap: Map<string, Exercise> }) {
+  const [days, setDays] = useState<MapPeriod>(28);
+  const items = useMemo(() => loadMap(workouts, exMap, resolveWeights, { days }), [workouts, exMap, days]);
+  const empty = items.every((m) => m.weighted === 0);
+  const seg = (on: boolean) => 'btn small ' + (on ? 'primary' : 'ghost');
+  return (
+    <div className="section" data-testid="load-map">
+      <h2>Карта нагрузки</h2>
+      <div style={{ display: 'flex', gap: 6, marginBottom: 8 }} role="group" aria-label="Период карты">
+        {MAP_PERIODS.map((d) => <button key={d} className={seg(days === d)} aria-pressed={days === d} onClick={() => setDays(d)}>{d} дн.</button>)}
+      </div>
+      {empty ? <p className="empty">За выбранный период силовых тренировок нет.</p> : (
+        <>
+          <BodyMap items={items} days={days} />
+          <BodyMapTable items={items} />
+          <p className="sub">Оценка по подходам, не измерение: основная мышца упражнения считается как 1 подход, вспомогательная как 0,5 (по карточке упражнения; без карточки подход идёт в группу упражнения). Цвет — доля от твоей самой нагруженной группы за период. Норм объёма нет: «К обычному» сравнивает с твоим средним за последние 8 недель и появляется, когда истории не меньше четырёх недель. Разминка не учитывается, кардио не входит.</p>
+        </>
+      )}
+    </div>
+  );
+}
+
 function DeepStats({ workouts, exMap }: { workouts: Workout[]; exMap: Map<string, Exercise> }) {
   const plateaus = useMemo(() => detectPlateaus(workouts), [workouts]);
   const load = useMemo(() => loadRatio(workouts), [workouts]);
@@ -212,6 +243,7 @@ function DeepStats({ workouts, exMap }: { workouts: Workout[]; exMap: Map<string
       </div>
 
       <MuscleLoadSection workouts={workouts} exMap={exMap} />
+      <LoadMapSection workouts={workouts} exMap={exMap} />
 
       <div className="section">
         <h2>Нагрузка</h2>

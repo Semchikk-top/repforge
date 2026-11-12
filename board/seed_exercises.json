@@ -114,5 +114,85 @@
  "seed-029": {
   "name": "Подъём на носки стоя",
   "muscle": "calves"
+ },
+ "seed-033": {
+  "name": "Жим гантелей лёжа",
+  "muscle": "chest"
+ },
+ "seed-034": {
+  "name": "Жим штанги на наклонной скамье",
+  "muscle": "chest"
+ },
+ "seed-035": {
+  "name": "Сведение рук в тренажёре",
+  "muscle": "chest"
+ },
+ "seed-036": {
+  "name": "Тяга Т-грифа",
+  "muscle": "back"
+ },
+ "seed-037": {
+  "name": "Тяга в тренажёре сидя",
+  "muscle": "back"
+ },
+ "seed-038": {
+  "name": "Гиперэкстензия",
+  "muscle": "back"
+ },
+ "seed-039": {
+  "name": "Болгарские выпады",
+  "muscle": "legs"
+ },
+ "seed-040": {
+  "name": "Фронтальные приседания",
+  "muscle": "legs"
+ },
+ "seed-041": {
+  "name": "Гоблет-приседания",
+  "muscle": "legs"
+ },
+ "seed-042": {
+  "name": "Зашагивания на платформу",
+  "muscle": "glutes"
+ },
+ "seed-043": {
+  "name": "Жим Арнольда",
+  "muscle": "shoulders"
+ },
+ "seed-044": {
+  "name": "Махи гантелей в наклоне",
+  "muscle": "shoulders"
+ },
+ "seed-045": {
+  "name": "Обратные разведения в тренажёре",
+  "muscle": "shoulders"
+ },
+ "seed-046": {
+  "name": "Подъём гантелей на бицепс",
+  "muscle": "biceps"
+ },
+ "seed-047": {
+  "name": "Сгибание рук на скамье Скотта",
+  "muscle": "biceps"
+ },
+ "seed-048": {
+  "name": "Разгибание руки из-за головы",
+  "muscle": "triceps"
+ },
+ "seed-049": {
+  "name": "Жим лёжа узким хватом",
+  "muscle": "triceps"
+ },
+ "seed-050": {
+  "name": "Боковая планка",
+  "muscle": "core"
+ },
+ "seed-051": {
+  "name": "Ролик для пресса",
+  "muscle": "core"
+ },
+ "seed-052": {
+  "name": "Подъём на носки сидя",
+  "muscle": "calves"
  }
 }

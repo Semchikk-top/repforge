@@ -13,7 +13,7 @@ errors = []
 SPEECH = """
 window.__spoken = [];
 window.SpeechSynthesisUtterance = window.SpeechSynthesisUtterance || function (t) { this.text = t; };
-Object.defineProperty(window, 'speechSynthesis', { value: { speak(u) { window.__spoken.push(u.text); }, cancel() {} }, configurable: true });
+Object.defineProperty(window, 'speechSynthesis', { value: { speak(u) { window.__spoken.push(u.text); setTimeout(() => u.onend && u.onend(), 0); }, cancel() {} }, configurable: true });
 """
 
 
@@ -52,9 +52,12 @@ with sync_playwright() as p:
 
     # --- настройки ---
     pg.click(".nav button:has-text('Профиль')"); pg.click("button[aria-label='Настройки']")
+    pg.click("[role=tab]:has-text('Тренировка')")
     pg.fill("#goal-km", "5")
     pg.select_option("#zone", "200")
+    pg.click("[role=tab]:has-text('Звук')")
     pg.locator(".toggle:has([aria-label='Голосовые подсказки'])").click()
+    pg.click("[role=tab]:has-text('О приложении')")
     check("версия приложения видна", pg.locator(f"text=Версия {VERSION}").count() == 1)
 
     # --- цели недели ---
@@ -101,7 +104,7 @@ with sync_playwright() as p:
     pg.click("button:has-text('Готово')")
     pg.click(".nav button:has-text('Тренировка')")
     pg.wait_for_selector(".goal-card")
-    check("цель недели: 2 тренировки", re.search(r"2\s*из 3", pg.inner_text(".goal-card")) is not None, pg.inner_text(".goal-card").replace("\n", " "))
+    check("цель недели: две тренировки за день — один тренировочный день", re.search(r"1\s*из 3", pg.inner_text(".goal-card")) is not None, pg.inner_text(".goal-card").replace("\n", " "))
 
     # --- замеры тела ---
     pg.click(".nav button:has-text('Аналитика')")
@@ -132,9 +135,10 @@ with sync_playwright() as p:
     pg.evaluate("t => window.__gps.run(t, 0, 3, 366, 5, 100)", t0)                  # 1098 м
     pg.wait_for_timeout(1500)
     pg.evaluate("t => window.__gps.run(t, 1098, 3, 334, 5, 100)", t0 + 366_000)      # до 2100 м
-    pg.wait_for_timeout(1500)
+    pg.wait_for_function("() => window.__spoken.filter((t) => /^\\d/.test(t)).length >= 2", timeout=8000)
     spoken = pg.evaluate("window.__spoken")
-    check("голос после 1 и 2 км", len(spoken) == 2 and spoken[0].startswith("1 километр. Темп 5 минут") and spoken[1].startswith("2 километра."), spoken)
+    km = [t for t in spoken if re.match(r"\d", t)]
+    check("голос после 1 и 2 км", len(km) == 2 and km[0].startswith("1 километр. Темп 5 минут") and km[1].startswith("2 километра."), spoken)
     pg.click(".rec-screen button:has-text('Завершить')")
     pg.wait_for_selector(".cardio-grid")
     check("пояснение про зону приватности", pg.locator("text=зона приватности 200 м").count() == 1)

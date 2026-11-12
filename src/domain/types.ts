@@ -159,6 +159,22 @@ export interface CheckIn extends SyncMeta {
   note?: string;
 }
 
+/**
+ * Попытка пройти тест курса (1.5.0). Запись только добавляется и не правится: поэтому слияние между устройствами
+ * тривиально (объединение), а конфликтов нет. «Отметка о прохождении» не хранится, а выводится: есть успешная попытка.
+ * Какие именно ответы были неверными, не сохраняется: разбор ошибок показывается один раз сразу после теста.
+ */
+export interface LearningAttempt extends SyncMeta {
+  courseId: string;
+  courseVersion: number;
+  correct: number;
+  total: number;
+  /** Порог в процентах, действовавший в момент попытки: позже его можно менять, а прежние результаты остаются верными. */
+  threshold: number;
+  passed: boolean;
+  date: string;                 // YYYY-MM-DD
+}
+
 export interface TemplateExercise {
   exerciseId: ID;
   group?: ID;
@@ -188,6 +204,8 @@ export interface Settings {
   voiceCues: boolean;         // голосовые подсказки на каждом километре
   voiceNav: boolean;          // голос навигации на улице (повороты, сход с маршрута); по умолчанию выключен: включается явно
   voiceCoach: boolean;        // тренировочные подсказки (половина дистанции, пульсовая зона, темп); по умолчанию выключены
+  ttsEngine: 'system' | 'fish'; // чем озвучивать готовые фразы: системным голосом или Fish Speech из локального пака; динамика всегда системная
+  ttsVoiceId: string;         // выбранный голос Fish (id на сервере ПК); пусто — не выбран
   barWeight: number;          // вес грифа для калькулятора блинов
   plates: number[];           // какие блины есть в зале (кг), от них считает калькулятор
   maxHr: number;              // максимальный пульс для зон; 0 — не задан
@@ -216,6 +234,8 @@ export const DEFAULT_SETTINGS: Settings = {
   voiceCues: false,
   voiceNav: false,
   voiceCoach: false,
+  ttsEngine: 'system',
+  ttsVoiceId: '',
   barWeight: 20,
   plates: [25, 20, 15, 10, 5, 2.5, 1.25],
   maxHr: 0,
@@ -248,7 +268,7 @@ export const MUSCLE_LABELS: Record<MuscleGroup, string> = {
 // Запись журнала изменений (outbox) — основа будущей синхронизации.
 export interface ChangeRecord {
   seq?: number;
-  table: 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game' | 'checkins';
+  table: 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game' | 'checkins' | 'learning';
   entityId: ID;
   op: 'put' | 'delete';
   ts: number;
@@ -280,7 +300,7 @@ export interface Program extends SyncMeta {
 // Только на этом устройстве (не синхронизируется): снимок версии, которую перезаписали с другого устройства
 export interface ConflictRecord {
   id?: number;
-  table: 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game' | 'checkins';
+  table: 'exercises' | 'workouts' | 'templates' | 'tracks' | 'body' | 'programs' | 'profile' | 'game' | 'checkins' | 'learning';
   entityId: ID;
   label: string;
   local: Record<string, unknown>;

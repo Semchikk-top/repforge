@@ -14,7 +14,7 @@ import { LiveChannel, POLL_MS, shouldPoll, type LiveState } from './live';
 // Конфликты: побеждает запись с большим updatedAt, при равенстве — с большим deviceId (то же правило, что на сервере).
 
 type TableName = ChangeRecord['table'];
-const TABLES: TableName[] = ['exercises', 'workouts', 'templates', 'tracks', 'body', 'programs', 'profile', 'game', 'checkins'];
+const TABLES: TableName[] = ['exercises', 'workouts', 'templates', 'tracks', 'body', 'programs', 'profile', 'game', 'checkins', 'learning'];
 const BATCH = 500;
 const MAX_ROUNDS = 20;
 
@@ -244,7 +244,7 @@ export async function pruneBases(): Promise<number> {
 }
 
 export async function applyRemote(entities: WireEntity[], sentSeqs: number[], since: number, sent: WireEntity[] = []) {
-  await db.transaction('rw', [db.exercises, db.workouts, db.templates, db.tracks, db.body, db.programs, db.profile, db.game, db.checkins, db.conflicts, db.changes, db.kv, db.bases], async () => {
+  await db.transaction('rw', [db.exercises, db.workouts, db.templates, db.tracks, db.body, db.programs, db.profile, db.game, db.checkins, db.learning, db.conflicts, db.changes, db.kv, db.bases], async () => {
     const pending = new Set((await db.changes.where('synced').equals(0).toArray()).map((c) => `${c.table}:${c.entityId}`));
     const myId = await getDeviceId();
     // то, что мы отправили, теперь и есть версия сервера (если чужая окажется новее, ниже она перезапишет предка)

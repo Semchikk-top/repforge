@@ -6,7 +6,7 @@ import { useToast } from '../ui/Toast';
 
 const LABEL: Record<BackupTable, string> = {
   workouts: 'Тренировки', exercises: 'Упражнения', templates: 'Шаблоны', body: 'Замеры тела',
-  programs: 'Программы', checkins: 'Чек-ины', tracks: 'Треки', game: 'Игровые данные'
+  programs: 'Программы', checkins: 'Чек-ины', tracks: 'Треки', game: 'Игровые данные', learning: 'Попытки тестов'
 };
 
 /**

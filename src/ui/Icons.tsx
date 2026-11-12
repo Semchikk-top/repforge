@@ -26,3 +26,4 @@ export const IconSwap = mk(<><path d="M4 8h14M14 4l4 4-4 4" /><path d="M20 16H6M
 export const IconGrip = mk(<path d="M5 8h14M5 12h14M5 16h14" />);
 export const IconArrowUp = mk(<path d="M12 19V5M6 11l6-6 6 6" />);
 export const IconArrowDown = mk(<path d="M12 5v14M6 13l6 6 6-6" />);
+export const IconInfo = mk(<><circle cx="12" cy="12" r="9" /><path d="M12 11v5.5M12 7.6h.01" /></>);

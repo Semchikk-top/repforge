@@ -13,6 +13,8 @@ import {
   type NavState, type NavStatus
 } from './nav';
 import { SpeechQueue } from './speechQueue';
+import { createSpeechEngine } from '../tts/engine';
+import { manifest as ttsManifest } from '../tts/cache';
 import {
   eventPhrase, expandPlan, finalLaps, initialIntervalState, intervalStep, lengthLabel, skipStep, stepProgress, targetLabel, validatePlan,
   type IntervalEvent, type IntervalSample, type IntervalState, type Step
@@ -127,7 +129,10 @@ export function CardioRecorder({ workoutId, weId, sport, title, resume, place, p
   const settingsRef = useRef(settings); settingsRef.current = settings;
   const hrBpmRef = useRef<number | null>(null);
   const queue = useRef<SpeechQueue | null>(null);
-  if (!queue.current) queue.current = new SpeechQueue({ speak: (t) => platform.speech.speak(t), stop: () => platform.speech.stop() });
+  // Гибридный движок: готовый файл Fish из памяти устройства, иначе системный голос. Сети в горячем пути нет.
+  if (!queue.current) queue.current = new SpeechQueue(createSpeechEngine({
+    system: platform.speech, store: platform.audioStore, player: platform.audioPlayer, manifest: ttsManifest(), settings: () => settingsRef.current
+  }));
   // озвучка никогда не мешает записи: все вызовы идут через очередь, которая глотает сбои движка
   const sayNav = (text: string, key?: string) => { if (!mutedRef.current && settingsRef.current.voiceNav) queue.current!.say({ text, priority: 'nav', key }); };
   const sayTrain = (text: string, key?: string, enabled: boolean = settingsRef.current.voiceCoach, ttlMs?: number) => { if (!mutedRef.current && enabled) queue.current!.say({ text, priority: 'training', key, ttlMs }); };
